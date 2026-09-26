@@ -541,9 +541,10 @@ def test_overlay_and_decision_variable_are_mutually_exclusive():
         / "custom_components" / "power_sync" / "optimization" / "coordinator.py"
     ).read_text()
 
-    assert 'if effective_source == "internal"' in source
-    assert "self._build_ev_charge_plan(self._price_timestamps(n_ev))" in source
-    assert "effective_ev_load_w = zeros" in source
+    assert 'self._pending_ev_charge_plan = self._build_ev_charge_plan(' in source
+    assert "self._build_ev_charge_plan(" in source
+    assert "self._price_timestamps(n_ev)" in source
+    assert "suppressed_loadpoint_ids" in source
     # The solve must consume the plan decided at overlay time, not rebuild it
     # after the overlay has already been applied to load.
     assert 'ev_charge_plan = getattr(self, "_pending_ev_charge_plan", None)' in source

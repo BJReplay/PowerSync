@@ -330,9 +330,12 @@ class _FakeOverlayCoordinator:
         self._last_smart_schedule_ev_load_w = None
         self._last_price_level_expected_ev_load_w = None
         self._last_price_level_projection = None
+        self._last_ev_optimizer_policy = None
         self._planned_ev_load_entity_id = "sensor.external" if external_forecast else None
         self._warned_dual_ev_overlay = False
         self._ev_charge_plan = None
+        self._price_components = {}
+        self._policy_loadpoints = []
 
     def _get_planned_ev_load_forecast(self, n_intervals: int) -> list[float] | None:
         return self._external_forecast
@@ -344,12 +347,15 @@ class _FakeOverlayCoordinator:
         # These cases cover the overlay's own internal/external merge, so LP
         # co-optimization is off; when it is on the overlay is superseded and
         # there is nothing here to merge.
+        self._last_ev_optimizer_policy = {
+            identifier: {} for identifier in self._policy_loadpoints
+        }
         return self._ev_charge_plan
 
     async def _build_price_level_projection(self, n_intervals: int):
         return SimpleNamespace(
             expected_w=tuple(0.0 for _ in range(n_intervals)),
-            expected_by_loadpoint={},
+            expected_by_loadpoint=self._price_components,
             conditional_cap_w=tuple(0.0 for _ in range(n_intervals)),
             windows=(),
             warnings=(),
@@ -368,13 +374,48 @@ class _FakeOverlayCoordinator:
     def _get_ev_planned_load_components(self, n_intervals: int):
         return {"ev": self._internal_forecast} if self._internal_forecast else {}
 
+    def _canonical_ev_loadpoint_ids(self, identifiers):
+        return {str(identifier): str(identifier) for identifier in identifiers}
+
     def _merge_internal_ev_load_components(
-        self, *, n_intervals, smart_components, price_components
+        self,
+        *,
+        n_intervals,
+        smart_components,
+        price_components,
+        suppressed_loadpoints=None,
     ):
-        smart = list(next(iter(smart_components.values()), [0.0] * n_intervals))
-        price = list(next(iter(price_components.values()), [0.0] * n_intervals))
-        effective = [max(smart[i], price[i]) for i in range(n_intervals)]
-        marginal = [max(0.0, effective[i] - smart[i]) for i in range(n_intervals)]
+        suppressed = set(suppressed_loadpoints or ())
+        by_loadpoint = {}
+        for source in (smart_components, price_components):
+            for identifier, values in source.items():
+                if identifier in suppressed:
+                    continue
+                target = by_loadpoint.setdefault(
+                    identifier,
+                    {
+                        "smart": [0.0] * n_intervals,
+                        "price": [0.0] * n_intervals,
+                    },
+                )
+                key = "smart" if source is smart_components else "price"
+                for index in range(min(n_intervals, len(values))):
+                    target[key][index] = max(
+                        target[key][index], float(values[index] or 0.0)
+                    )
+        effective = [0.0] * n_intervals
+        smart = [0.0] * n_intervals
+        marginal = [0.0] * n_intervals
+        for values in by_loadpoint.values():
+            for index in range(n_intervals):
+                smart_value = values["smart"][index]
+                selected = max(smart_value, values["price"][index])
+                effective[index] += selected
+                smart[index] += smart_value
+                marginal[index] += max(0.0, selected - smart_value)
+        self._last_ev_optimizer_policy = {
+            identifier: {} for identifier in self._policy_loadpoints
+        }
         return effective, smart, marginal
 
     def _price_level_projection_payload(self, **_kwargs):
@@ -905,6 +946,21 @@ def test_internal_ev_arbitration_uses_max_for_one_loadpoint_and_sum_for_distinct
     assert smart == pytest.approx([7000, 0])
     assert price == pytest.approx([2000, 9200])
 
+    suppressed_effective, suppressed_smart, suppressed_price = merge(
+        coordinator,
+        n_intervals=2,
+        smart_components={"fleet_vin": [7000, 0]},
+        price_components={
+            "ble_alias": (3600, 7200),
+            "other": (2000, 2000),
+        },
+        suppressed_loadpoints={"physical_a"},
+    )
+
+    assert suppressed_effective == pytest.approx([2000, 2000])
+    assert suppressed_smart == pytest.approx([0, 0])
+    assert suppressed_price == pytest.approx([2000, 2000])
+
 
 def test_price_level_projection_payload_is_versioned_and_array_aligned():
     payload_method = _extract_coordinator_method("_price_level_projection_payload")
@@ -957,7 +1013,7 @@ def test_ev_overlay_is_suppressed_when_the_lp_co_optimizes():
     coordinator._ev_charge_plan = [
         SimpleNamespace(
             energy_needed_kwh=6.0,
-            vehicle_id="car",
+            vehicle_id="ev",
         )
     ]
 
@@ -981,3 +1037,62 @@ def test_policy_blocked_empty_ev_plan_suppresses_internal_overlay():
 
     assert load == [2000.0, 2000.0, 2000.0, 2000.0]
     assert coordinator._last_planned_ev_load_forecast_w is None
+
+
+def test_empty_smart_plan_preserves_unrelated_price_level_demand():
+    """A blocked/no-op Smart plan must not erase another EV loadpoint."""
+    coordinator = _FakeOverlayCoordinator(
+        external_forecast=None,
+        internal_forecast=None,
+        ev_integration_enabled=True,
+    )
+    coordinator._ev_charge_plan = []
+    coordinator._price_components = {
+        "price-level-ev": [6800.0, 6800.0, 0.0, 0.0]
+    }
+
+    load = _run_overlay(coordinator, [2000.0, 2000.0, 2000.0, 2000.0])
+
+    assert load == [8800.0, 8800.0, 2000.0, 2000.0]
+
+
+def test_blocked_smart_loadpoint_still_suppresses_price_level_takeover():
+    """A blocked Smart owner protects its loadpoint, not unrelated EVs."""
+    coordinator = _FakeOverlayCoordinator(
+        external_forecast=None,
+        internal_forecast=None,
+        ev_integration_enabled=True,
+    )
+    coordinator._ev_charge_plan = []
+    coordinator._policy_loadpoints = ["smart-ev"]
+    coordinator._price_components = {
+        "smart-ev": [6800.0, 6800.0, 0.0, 0.0],
+        "other-ev": [1200.0, 1200.0, 0.0, 0.0],
+    }
+
+    load = _run_overlay(coordinator, [2000.0, 2000.0, 2000.0, 2000.0])
+
+    assert load == [3200.0, 3200.0, 2000.0, 2000.0]
+
+
+def test_lp_plan_suppresses_only_its_loadpoint_overlay():
+    """Co-optimizing one EV must retain independent Price-Level demand."""
+    coordinator = _FakeOverlayCoordinator(
+        external_forecast=None,
+        internal_forecast=[3000.0, 3000.0, 0.0, 0.0],
+        ev_integration_enabled=True,
+    )
+    coordinator._ev_charge_plan = [
+        SimpleNamespace(
+            energy_needed_kwh=6.0,
+            vehicle_id="ev",
+        )
+    ]
+    coordinator._price_components = {
+        "ev": [6800.0, 6800.0, 0.0, 0.0],
+        "other-ev": [1200.0, 1200.0, 0.0, 0.0],
+    }
+
+    load = _run_overlay(coordinator, [2000.0, 2000.0, 2000.0, 2000.0])
+
+    assert load == [3200.0, 3200.0, 2000.0, 2000.0]

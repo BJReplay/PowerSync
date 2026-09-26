@@ -6525,6 +6525,43 @@ class OptimizationCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                         self._warned_dual_ev_overlay = True
                 else:
+                    # Build the LP hand-off before merging fixed overlays so
+                    # arbitration can be scoped to the physical loadpoints
+                    # that Smart Schedule actually owns.  ``[]`` is a valid
+                    # blocked-plan sentinel; it must not erase unrelated
+                    # Price-Level demand from another loadpoint.
+                    self._pending_ev_charge_plan = self._build_ev_charge_plan(
+                        self._price_timestamps(n_ev)
+                    )
+                    plan_loadpoint_ids = [
+                        str(getattr(plan, "vehicle_id", "") or "")
+                        for plan in (self._pending_ev_charge_plan or ())
+                        if getattr(plan, "vehicle_id", None)
+                    ]
+                    policy_loadpoint_ids = [
+                        str(loadpoint_id)
+                        for loadpoint_id in (
+                            getattr(self, "_last_ev_optimizer_policy", None) or {}
+                        )
+                        if loadpoint_id
+                    ]
+                    suppressed_loadpoint_ids: set[str] = set()
+                    if self._pending_ev_charge_plan is not None:
+                        owned_ids = [
+                            *plan_loadpoint_ids,
+                            *policy_loadpoint_ids,
+                        ]
+                        # Lightweight callers can provide the blocked
+                        # sentinel without policy diagnostics.  The Smart
+                        # overlay keys are then the only safe ownership
+                        # boundary available to preserve.
+                        if not owned_ids and not self._pending_ev_charge_plan:
+                            owned_ids = [
+                                str(identifier) for identifier in smart_components
+                            ]
+                        suppressed_loadpoint_ids = set(
+                            self._canonical_ev_loadpoint_ids(owned_ids).values()
+                        )
                     (
                         effective_ev_load_w,
                         smart_w,
@@ -6533,6 +6570,7 @@ class OptimizationCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         n_intervals=n_ev,
                         smart_components=smart_components,
                         price_components=price_projection.expected_by_loadpoint,
+                        suppressed_loadpoints=suppressed_loadpoint_ids,
                     )
                     display_projection = price_projection
                     external_ev_load_w = zeros
@@ -6561,11 +6599,6 @@ class OptimizationCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # authoritative EV forecast. Do not also hand the internal
                 # Smart Schedule demand to the LP: that would add a second EV
                 # decision variable on top of the external load overlay.
-                self._pending_ev_charge_plan = (
-                    self._build_ev_charge_plan(self._price_timestamps(n_ev))
-                    if effective_source == "internal"
-                    else None
-                )
                 if self._pending_ev_charge_plan is not None:
                     _LOGGER.debug(
                         "EV load overlay: superseded by LP co-optimization "
@@ -6576,7 +6609,6 @@ class OptimizationCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         ),
                         len(self._pending_ev_charge_plan),
                     )
-                    effective_ev_load_w = zeros
 
                 if any(value > 0 for value in effective_ev_load_w):
                     load = [
@@ -16541,10 +16573,15 @@ class OptimizationCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         n_intervals: int,
         smart_components: dict[str, list[float]],
         price_components: dict[str, tuple[float, ...]],
+        suppressed_loadpoints: set[str] | None = None,
     ) -> tuple[list[float], list[float], list[float]]:
         """Union same-loadpoint plans and sum genuinely separate chargers."""
         identifiers = [*smart_components, *price_components]
         canonical = self._canonical_ev_loadpoint_ids(identifiers)
+        suppressed = {
+            str(loadpoint_id)
+            for loadpoint_id in (suppressed_loadpoints or set())
+        }
         smart_by_loadpoint: dict[str, list[float]] = {}
         price_by_loadpoint: dict[str, list[float]] = {}
 
@@ -16554,6 +16591,8 @@ class OptimizationCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             for identifier, values in source.items():
                 loadpoint = canonical.get(identifier, identifier)
+                if loadpoint in suppressed:
+                    continue
                 target = destination.setdefault(loadpoint, [0.0] * n_intervals)
                 for index in range(min(n_intervals, len(values))):
                     try:
