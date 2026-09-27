@@ -125,6 +125,10 @@ AUTO_SCHEDULE_START_RETRY_MAX_SECONDS = 15 * 60
 PRICE_LEVEL_START_RETRY_BASE_SECONDS = 30
 PRICE_LEVEL_START_RETRY_MAX_SECONDS = 15 * 60
 FREE_GRID_PRICE_EPSILON_CENTS = 0.001
+# The optimizer's fixed schedule interval is five minutes.  EPEX schedules
+# normally carry the next timestamp explicitly, but the final returned slot
+# needs this fallback to keep its duration bounded as well.
+EPEX_FORECAST_INTERVAL = timedelta(minutes=5)
 
 # Executor decisions that mean no vehicle is physically on this loadpoint.
 # Their plans are retained to protect future demand, so any consumer that
@@ -377,6 +381,31 @@ def _usable_forecast_window(
     if usable_fraction < 0.1:
         return None
     return end_dt, usable_fraction
+
+
+def _forecast_interval_end(
+    price_forecast: Sequence["PriceForecast"],
+    index: int,
+    start_dt: datetime,
+) -> datetime:
+    """Return the end of a price interval without inflating EPEX slots."""
+    price = price_forecast[index]
+    if price.period != "epex":
+        return start_dt + timedelta(hours=1)
+
+    for following in price_forecast[index + 1:]:
+        following_dt = _parse_forecast_hour_local_naive(following.hour)
+        if following_dt is not None and following_dt > start_dt:
+            return following_dt
+
+    return start_dt + EPEX_FORECAST_INTERVAL
+
+
+def _forecast_interval_identity(price: "PriceForecast") -> str:
+    """Keep EPEX intervals distinct while preserving hourly de-duplication."""
+    if price.period == "epex":
+        return f"epex:{price.hour}"
+    return _forecast_hour_key(price.hour) or price.hour
 
 
 def _configured_ble_prefixes(
@@ -3477,14 +3506,22 @@ class ChargingPlanner:
             if hour_dt < now - timedelta(hours=1):
                 continue
 
-            # Calculate usable fraction of this hour (clamp to departure and now)
-            hour_end = hour_dt + timedelta(hours=1)
+            # Bound each option by its real source interval.  EPEX prices are
+            # optimizer slots (normally five minutes), not hourly estimates.
+            hour_end = _forecast_interval_end(price_forecast, i, hour_dt)
             if target_time_local and hour_end > target_time_local:
                 hour_end = target_time_local
-            usable_fraction = (hour_end - max(hour_dt, now)).total_seconds() / 3600
-            usable_fraction = max(0.0, min(1.0, usable_fraction))
-            if usable_fraction < 0.1:
-                continue  # Less than 6 minutes usable — skip
+            interval_hours = max(
+                0.0,
+                (hour_end - hour_dt).total_seconds() / 3600,
+            )
+            usable_fraction = (
+                hour_end - max(hour_dt, now)
+            ).total_seconds() / 3600
+            usable_fraction = max(0.0, min(interval_hours, usable_fraction))
+            minimum_usable_fraction = 0.0 if price.period == "epex" else 0.1
+            if usable_fraction <= minimum_usable_fraction:
+                continue
 
             # Check for solar surplus at this hour
             surplus = surplus_by_hour.get(_forecast_hour_key(price.hour))
@@ -3502,7 +3539,7 @@ class ChargingPlanner:
                     in repeated_price_hours
                 ),
             )
-            option_identity = _forecast_hour_key(price.hour) or display_start
+            option_identity = _forecast_interval_identity(price)
 
             # Solar surplus is free
             if solar_available >= 1.0 and solar_surplus_price_allows_charging(
@@ -3665,15 +3702,16 @@ class ChargingPlanner:
         solar_energy = 0
         grid_energy = 0
         total_cost = 0
-        used_hours = set()
+        used_intervals = set()
 
         for option in charging_options:
             if energy_allocated >= energy_needed_kwh:
                 break
 
-            # Skip if already used this hour
-            hour_key = option["identity"]
-            if hour_key in used_hours:
+            # Skip duplicate source intervals, but allow distinct EPEX slots
+            # within the same clock hour to contribute independently.
+            interval_key = option["identity"]
+            if interval_key in used_intervals:
                 continue
 
             usable = option.get("usable_fraction", 1.0)
@@ -3710,7 +3748,7 @@ class ChargingPlanner:
                 grid_energy += energy_this_hour
                 total_cost += energy_this_hour * option["cost_cents"]
 
-            used_hours.add(hour_key)
+            used_intervals.add(interval_key)
 
         # Sort windows by time for display
         windows.sort(key=lambda w: w.start_time)

@@ -7873,6 +7873,80 @@ def test_epex_current_price_uses_the_active_optimizer_slot(monkeypatch):
     assert asyncio.run(executor._get_current_price()) == 197.28
 
 
+def test_epex_cost_optimized_bounds_each_slot_to_real_duration(monkeypatch):
+    """A five-minute cheap slot must not be advertised as a one-hour window."""
+    now = datetime(2026, 9, 17, 18, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(ev_planner.dt_util, "now", lambda: now)
+    planner = ev_planner.ChargingPlanner(_FakeHass(), _FakeConfigEntry())
+    price_forecast = [
+        ev_planner.PriceForecast(
+            hour=f"2026-09-17T18:{minute:02d}:00",
+            import_cents=price,
+            export_cents=0.0,
+            period="epex",
+        )
+        for minute, price in ((0, 5.0), (5, 100.0), (10, 100.0))
+    ]
+
+    plan = asyncio.run(
+        planner._plan_cost_optimized(
+            vehicle_id=VIN,
+            current_soc=60,
+            target_soc=70,
+            target_time=datetime(2026, 9, 17, 20, 0),
+            energy_needed_kwh=5.0,
+            charger_power_kw=6.0,
+            surplus_forecast=[],
+            price_forecast=price_forecast,
+            max_grid_price_cents=25.0,
+        )
+    )
+
+    assert [(window.start_time, window.end_time) for window in plan.windows] == [
+        ("2026-09-17T18:00:00", "2026-09-17T18:05:00")
+    ]
+    assert plan.estimated_grid_kwh == pytest.approx(0.5)
+    assert plan.can_meet_target is False
+    assert "0.5kWh" in plan.warning
+
+
+def test_epex_cost_optimized_accumulates_distinct_final_slots(monkeypatch):
+    """Distinct five-minute slots may meet a small target without overlap."""
+    now = datetime(2026, 9, 17, 18, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(ev_planner.dt_util, "now", lambda: now)
+    planner = ev_planner.ChargingPlanner(_FakeHass(), _FakeConfigEntry())
+    price_forecast = [
+        ev_planner.PriceForecast(
+            hour=f"2026-09-17T18:{minute:02d}:00",
+            import_cents=5.0,
+            export_cents=0.0,
+            period="epex",
+        )
+        for minute in (0, 5)
+    ]
+
+    plan = asyncio.run(
+        planner._plan_cost_optimized(
+            vehicle_id=VIN,
+            current_soc=60,
+            target_soc=70,
+            target_time=datetime(2026, 9, 17, 20, 0),
+            energy_needed_kwh=0.8,
+            charger_power_kw=6.0,
+            surplus_forecast=[],
+            price_forecast=price_forecast,
+            max_grid_price_cents=25.0,
+        )
+    )
+
+    assert [(window.start_time, window.end_time) for window in plan.windows] == [
+        ("2026-09-17T18:00:00", "2026-09-17T18:05:00"),
+        ("2026-09-17T18:05:00", "2026-09-17T18:08:00"),
+    ]
+    assert plan.estimated_grid_kwh == pytest.approx(0.8)
+    assert plan.can_meet_target is True
+
+
 @pytest.fixture
 def scheduled_reconciliation(monkeypatch, fake_actions):
     from power_sync.automations import ev_ownership as ownership
