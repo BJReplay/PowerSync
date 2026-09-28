@@ -47,6 +47,10 @@ from .demand_charge_config import (
 )
 from .monitoring import async_prepare_monitoring_handoff, finish_monitoring_handoff
 from .powerwall_host import normalize_powerwall_gateway_host
+from .tesla_force_tariff import (
+    configured_force_discharge_prices,
+    validate_force_discharge_prices,
+)
 from .tesla_ble_mapping import (
     TeslaBleMappingError,
     configured_ble_prefixes,
@@ -105,6 +109,10 @@ from .const import (
     CONF_DAILY_SUPPLY_CHARGE,
     CONF_MONTHLY_SUPPLY_CHARGE,
     CONF_TESLA_API_PROVIDER,
+    CONF_TESLA_FORCE_DISCHARGE_BUY_PRICE,
+    CONF_TESLA_FORCE_DISCHARGE_SELL_PRICE,
+    DEFAULT_TESLA_FORCE_DISCHARGE_BUY_PRICE,
+    DEFAULT_TESLA_FORCE_DISCHARGE_SELL_PRICE,
     TESLA_PROVIDER_TESLEMETRY,
     TESLA_PROVIDER_FLEET_API,
     TESLA_PROVIDER_POWERSYNC,
@@ -6325,8 +6333,41 @@ class PowerSyncConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
+                    vol.Required(
+                        CONF_TESLA_FORCE_DISCHARGE_BUY_PRICE,
+                        default=DEFAULT_TESLA_FORCE_DISCHARGE_BUY_PRICE,
+                    ): NumberSelector(NumberSelectorConfig(
+                        min=0, max=99, step=0.01,
+                        mode=NumberSelectorMode.BOX,
+                    )),
+                    vol.Required(
+                        CONF_TESLA_FORCE_DISCHARGE_SELL_PRICE,
+                        default=DEFAULT_TESLA_FORCE_DISCHARGE_SELL_PRICE,
+                    ): NumberSelector(NumberSelectorConfig(
+                        min=0.01, max=99, step=0.01,
+                        mode=NumberSelectorMode.BOX,
+                    )),
                 }
             )
+
+        if user_input is not None:
+            try:
+                self._tesla_force_discharge_prices = validate_force_discharge_prices(
+                    user_input.get(
+                        CONF_TESLA_FORCE_DISCHARGE_BUY_PRICE,
+                        DEFAULT_TESLA_FORCE_DISCHARGE_BUY_PRICE,
+                    ),
+                    user_input.get(
+                        CONF_TESLA_FORCE_DISCHARGE_SELL_PRICE,
+                        DEFAULT_TESLA_FORCE_DISCHARGE_SELL_PRICE,
+                    ),
+                )
+            except ValueError:
+                return self.async_show_form(
+                    step_id="tesla_provider",
+                    data_schema=_build_schema(self._tesla_fleet_available),
+                    errors={"base": "tesla_force_discharge_prices_invalid"},
+                )
 
         async def _handle_ev_provider_selection(
             user_input_local: dict[str, Any],
@@ -7765,6 +7806,10 @@ class PowerSyncConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_TESLA_ENERGY_SITE_ID
                     ],
                 }
+                discharge_prices = getattr(self, "_tesla_force_discharge_prices", None)
+                if discharge_prices is not None:
+                    self._site_data[CONF_TESLA_FORCE_DISCHARGE_BUY_PRICE] = discharge_prices[0]
+                    self._site_data[CONF_TESLA_FORCE_DISCHARGE_SELL_PRICE] = discharge_prices[1]
 
                 if gateway_ip:
                     self._site_data[CONF_POWERWALL_LOCAL_IP] = gateway_ip
@@ -10218,6 +10263,19 @@ class PowerSyncOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            try:
+                discharge_buy, discharge_sell = validate_force_discharge_prices(
+                    user_input.get(
+                        CONF_TESLA_FORCE_DISCHARGE_BUY_PRICE,
+                        DEFAULT_TESLA_FORCE_DISCHARGE_BUY_PRICE,
+                    ),
+                    user_input.get(
+                        CONF_TESLA_FORCE_DISCHARGE_SELL_PRICE,
+                        DEFAULT_TESLA_FORCE_DISCHARGE_SELL_PRICE,
+                    ),
+                )
+            except ValueError:
+                errors["base"] = "tesla_force_discharge_prices_invalid"
             tesla_provider = user_input.get(
                 CONF_TESLA_API_PROVIDER, TESLA_PROVIDER_TESLEMETRY
             )
@@ -10255,6 +10313,8 @@ class PowerSyncOptionsFlow(config_entries.OptionsFlow):
                 new_data = dict(self.config_entry.data)
                 new_data[CONF_TESLA_API_PROVIDER] = tesla_provider
                 new_data[CONF_TESLA_EV_API_PROVIDER] = ev_choice
+                new_data[CONF_TESLA_FORCE_DISCHARGE_BUY_PRICE] = discharge_buy
+                new_data[CONF_TESLA_FORCE_DISCHARGE_SELL_PRICE] = discharge_sell
                 # Persist gateway IP changes; remove the key entirely when
                 # cleared so the diagnostic binary_sensor flips correctly
                 # rather than reading an empty string as "set".
@@ -10289,6 +10349,9 @@ class PowerSyncOptionsFlow(config_entries.OptionsFlow):
         )
         current_gateway_ip = self.config_entry.data.get(
             CONF_POWERWALL_LOCAL_IP, ""
+        )
+        current_discharge_buy, current_discharge_sell = (
+            configured_force_discharge_prices(self.config_entry.data)
         )
 
         tesla_providers = {
@@ -10329,6 +10392,20 @@ class PowerSyncOptionsFlow(config_entries.OptionsFlow):
                         CONF_POWERWALL_LOCAL_IP,
                         default=current_gateway_ip,
                     ): str,
+                    vol.Required(
+                        CONF_TESLA_FORCE_DISCHARGE_BUY_PRICE,
+                        default=current_discharge_buy,
+                    ): NumberSelector(NumberSelectorConfig(
+                        min=0, max=99, step=0.01,
+                        mode=NumberSelectorMode.BOX,
+                    )),
+                    vol.Required(
+                        CONF_TESLA_FORCE_DISCHARGE_SELL_PRICE,
+                        default=current_discharge_sell,
+                    ): NumberSelector(NumberSelectorConfig(
+                        min=0.01, max=99, step=0.01,
+                        mode=NumberSelectorMode.BOX,
+                    )),
                 }
             ),
             errors=errors,

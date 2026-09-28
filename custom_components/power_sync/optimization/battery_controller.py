@@ -146,7 +146,7 @@ class BatteryControllerWrapper:
         """
         Command battery to discharge.
 
-        For Tesla: Uploads TOU tariff with $20/kWh sell rate to incentivize discharge
+        For Tesla: Uploads a TOU tariff with configured temporary buy/sell rates
         For Sigenergy/Sungrow: Uses Modbus to set discharge mode
 
         Args:

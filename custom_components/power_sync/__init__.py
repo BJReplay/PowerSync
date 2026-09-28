@@ -21,6 +21,7 @@ from .settings_metadata import (
     split_optimizer_reserve_values,
 )
 from .registry_compat import iter_device_entries
+from .tesla_force_tariff import configured_force_discharge_prices
 from .tesla_calibration import (
     CALIBRATION_SOURCE_LOCAL_ALERT,
     CALIBRATION_SOURCE_MODE_STICK,
@@ -33853,14 +33854,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ensuring the timer doesn't fire before the tariff window ends.
         """
 
-        # Very high sell rate to encourage Powerwall to export all energy
-        sell_rate_discharge = 99.00  # $99/kWh - huge incentive to discharge
+        # Temporary rates are user-configurable; normal tariff rates below
+        # remain unchanged outside the force-discharge window.
+        buy_rate_discharge, sell_rate_discharge = configured_force_discharge_prices(
+            entry.data
+        )
         sell_rate_normal = 0.08      # 8c/kWh normal feed-in
 
-        # Buy rates: HIGH during discharge so Tesla Time-Based Control does not
-        # treat the force window as cheap grid import arbitrage.
         # Normal outside discharge window.
-        buy_rate_discharge = 99.00   # $99/kWh - no incentive to import from grid
         buy_rate_normal = 0.30       # 30c/kWh
 
         _LOGGER.info(f"Creating discharge tariff: sell=${sell_rate_discharge}/kWh, buy=${buy_rate_discharge}/kWh for {duration_minutes} min")

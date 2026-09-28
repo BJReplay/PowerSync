@@ -3170,23 +3170,15 @@ def test_tesla_restore_updates_cached_export_rule_after_saved_rule_restore():
     assert restore_log_index < cache_update_index < restore_failed_index
 
 
-def test_tesla_force_discharge_tariff_discourages_grid_import():
+def test_tesla_force_discharge_tariff_reads_configured_prices():
     source = INIT_PATH.read_text()
     tree = ast.parse(source)
     function = _find_function(tree, "_create_discharge_tariff")
+    function_source = ast.get_source_segment(source, function)
 
-    rates = {
-        node.targets[0].id: node.value.value
-        for node in ast.walk(function)
-        if isinstance(node, ast.Assign)
-        and len(node.targets) == 1
-        and isinstance(node.targets[0], ast.Name)
-        and node.targets[0].id in {"buy_rate_discharge", "sell_rate_discharge"}
-        and isinstance(node.value, ast.Constant)
-    }
-
-    assert rates["buy_rate_discharge"] == 99.0
-    assert rates["sell_rate_discharge"] == 99.0
+    assert function_source is not None
+    assert "configured_force_discharge_prices(" in function_source
+    assert "entry.data" in function_source
 
 
 def test_tesla_force_discharge_applies_backup_reserve_after_tariff_upload():
