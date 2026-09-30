@@ -1,110 +1,31 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/bolagnaise/PowerSync/main/logo-circle.png" alt="PowerSync Logo" width="180"/>
-
-  # PowerSync
-
-  Intelligent battery energy management for Home Assistant. Automatically optimize your battery system with dynamic electricity pricing to minimize costs and maximize savings.
-
-  [![Sponsor](https://img.shields.io/badge/Sponsor-❤-ea4aaa?logo=github)](https://github.com/sponsors/Bolagnaise)
-  [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/eaWDWxEWE3)
-  [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-
-  <a href="https://testflight.apple.com/join/FhnUtSFy"><img src="https://img.shields.io/badge/iOS-TestFlight-blue?logo=apple&logoColor=white" alt="iOS TestFlight"></a>
-  <a href="https://play.google.com/store/apps/details?id=com.powersync.mobile"><img src="https://img.shields.io/badge/Android-Google%20Play-3DDC84?logo=android&logoColor=white" alt="Android Google Play"></a>
-
-</div>
-
-> **Disclaimer:** This is an unofficial integration and is not affiliated with or endorsed by Tesla, Sigenergy, Sungrow, FoxESS, GoodWe, AlphaESS, ESY Sunhome, Solax, SAJ, Fronius, SolarEdge, Neovolt, Bytewatt, Anker, Amber Electric, Localvolts, Flow Power, AGL, GloBird, CovaU, SA Power Networks, Octopus Energy, EPEX/ENTSO-E, or AEMO. Use at your own risk.
-
 > [!WARNING]
-> **The built-in optimizer is actively under development.** You should expect occasional bugs and schedules that don't behave as expected — particularly on unusual tariffs, battery configurations, or edge cases. If you see something odd, please report it on [Discord](https://discord.gg/eaWDWxEWE3) with your tariff details and the action plan it generated.
+> **Disclaimer:** This is an unofficial integration and is not affiliated with or endorsed by Tesla. Use at your own risk.
 
 ---
 
+Forked from the magnificent work done by Ben Boller at [@Bolagnaise](https://github.com/Bolagnaise/PowerSync) - see the source for the sources he built on.
+
+I've forked it for the Powerwall v1r pairing, and control only.
+
+This represents a basic replacement of Telsa Fleet and the original Tesla integrations.
+
 ## Supported Systems
 
-### Independent DC Solar Curtailment
-
-Battery export curtailment controls the battery/Tesla export path. Sigenergy,
-AlphaESS, and SolarEdge installations can instead enable their own DC solar
-curtailment option, which operates when battery dispatch is disabled. In
-Monitoring Mode, DC writes remain blocked unless **Allow curtailment control in
-Monitoring Mode** is explicitly enabled.
+Battery controls for Tesla powerwall via v1r.
 
 ### Battery Systems
 
 | System | Connection | Control |
 |--------|-----------|---------|
-| **Tesla Powerwall** | PowerSync.cc, Fleet API, or Teslemetry | TOU tariff sync, force charge/discharge, export rules, **off-grid/reconnect** |
-| **FoxESS** (H1, H3, H3-Pro, H3 Smart, KH + OEM rebrands) | Modbus TCP or RS485 | Work mode, force charge/discharge, backup reserve |
-| **Sigenergy** | Cloud API + Modbus TCP | Remote EMS control, force charge/discharge, DC solar curtailment. Smart Optimization requires Remote EMS with Sigenergy AI/native optimisation disabled; see [Sigenergy notes](docs/wiki/Sigenergy.md) |
-| **Solax Hybrid** (X1/X3, Gen4/Gen5/Gen6, AC Retro-Fit) | Via [Solax Modbus](https://github.com/wills106/homeassistant-solax-modbus) integration (HACS) | LP optimizer, force charge/discharge, backup reserve, export control |
-| **GoodWe** (ET, EH, BT, BH, ES, EM, BP) | UDP direct control, TCP local, or TCP/502 with HA GoodWe entity mode for LAN/Kit-20 | Force charge/discharge, backup reserve, export limit. LAN/Kit-20 force modes require entity mode; see [GoodWe notes](docs/wiki/GoodWe.md) |
-| **Sungrow SH-series** | Modbus TCP | Force charge/discharge, rate limiting, export control, dual inverter |
-| **AlphaESS** (SMILE5, SMILE-Hi5/Hi10, SMILE-B3, SMILE-T10, SMILE-G3, Storion-T30) | Modbus TCP + optional Cloud API, or Cloud-only monitoring | Force charge/discharge, dispatch SOC targeting, and DC solar curtailment over Modbus; telemetry/planning only in Cloud-only mode |
-| **ESY Sunhome** (HM series) | Via [ESY Sunhome](https://github.com/branko-lazarevic/esysunhome) companion integration (HACS) | LP optimizer, AEMO spike export, Saving Sessions (mode-only control) |
-| **SAJ H2 / HS2** | Via [SAJ H2 Modbus](https://github.com/stanus74/home-assistant-saj-h2-modbus) companion integration (HACS) | LP optimizer, force charge/discharge, AEMO spike export (no backup reserve write) |
-| **Fronius GEN24 storage** (BYD Battery-Box / Reserva) | Via [Fronius Modbus](https://github.com/callifo/fronius_modbus) companion integration (HACS) | LP optimizer, force charge/discharge, hold SOC, restore normal, backup reserve |
-| **Neovolt / Bytewatt** | Via [Neovolt Modbus](https://github.com/pvandenh/NeovoltBattery_ModbusPlugin) companion integration (HACS) | LP optimizer, force charge/discharge, backup reserve |
-| **SolarEdge Home Battery** | Via SolarEdge HA storage-control entities, plus Modbus TCP/entity fallback for inverter curtailment | Force charge/discharge, restore normal, backup reserve, Hold SOC, Smart Optimization dispatch, mobile controls, telemetry, live flow, usage stats, and active-power curtailment when the writable SolarEdge storage entities are exposed |
-| **Anker Solix** | Direct local X1 Modbus TCP, official local Anker HA integration, or unofficial Anker cloud HA bridge | Telemetry, live flow, Smart Optimization, force charge/discharge and restore when direct Modbus or writable official HA controls are available. Unofficial cloud bridge can be monitoring-only |
-| **Custom / external controller** | Existing Home Assistant entities for battery SOC, battery power, grid power, solar power, and home load | Planner-only Smart Optimization in monitoring mode. PowerSync exposes optimizer decisions and telemetry; your existing controller or automations keep ownership of hardware dispatch |
-
-Each battery system has a **Connection method** setting. Choose either the
-PowerSync-owned direct route or a supported Home Assistant battery integration.
-Home Assistant-backed and monitoring-only methods reuse the selected upstream
-config entry and do not open a second PowerSync hardware connection. PowerSync
-validates the source before switching, restores any active temporary battery
-mode through the old route, and blocks the change if cleanup cannot be proven.
-The dashboard can show recommended or all discovered upstream battery, solar,
-grid, load, energy, inverter, and diagnostic sensors without cloning them into
-duplicate PowerSync entities.
-
-### AC-Coupled Inverter Curtailment
-
-Solar inverters that bypass the battery can be curtailed during negative feed-in prices:
-
-| Inverter | Connection | Method |
-|----------|-----------|--------|
-| **Fronius** | SunSpec Modbus | WMaxLimPct power limiting |
-| **Sungrow SG** | Modbus TCP | Percentage power limit |
-| **Sungrow SH** | Modbus TCP | Export limit register |
-| **Enphase** | IQ Gateway REST API | DPEL/DER export limit |
-| **FoxESS** | Modbus TCP | Remote active power |
-| **Huawei** | Smart Dongle Modbus | Feed grid power limit |
-| **GoodWe** | Modbus TCP, or GoodWe Experimental HA entities for standalone MS | Export limit register/entity with verified restore |
-| **Zeversolar** | HTTP API | Power limit percentage |
-| **Solax** | Modbus TCP or HA entity | Export control user limit (reg 0x42) |
-| **Sigenergy** | Modbus TCP | Grid export limit / DC curtailment |
-| **AlphaESS** | Modbus TCP | MAX feed-into-grid percent (register 0x0800) |
-
-### Electricity Providers
-
-| Provider | Country | Pricing |
-|----------|---------|---------|
-| **Amber Electric** | Australia | Dynamic 5-min & 30-min pricing plus partial-day metered cost (API token required) |
-| **Localvolts** | Australia | Real-time 5-min wholesale pricing (API key + Partner ID) |
-| **Flow Power / AEMO** | Australia | Official Flow Power Web Data API or AEMO wholesale pricing |
-| **AGL Battery Rewards** | Australia | Address-specific import tariff with configurable calendar seasons, daily 5pm-9pm evening feed-in rates, and off-peak feed-in rates |
-| **Globird / AEMO VPP** | Australia | Retail tariff schedule + AEMO spike detection |
-| **CovaU SolarMax** | Australia | Fixture-backed NSW, Queensland and South Australia stepped tariffs with measured daily free-import and premium-export quotas |
-| **Octopus Energy** | UK | Dynamic 30-min (Agile, Go, Intelligent Go, Flux, Tracker). Reads from [BottlecapDave's integration](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy) when installed |
-| **EPEX Day-Ahead** | EU (DE, AT, BE, NL, DK, SE) | Native 15-min day-ahead pricing for Belgium; hourly aggregation elsewhere, with configurable surcharge & tax |
-| **NZ TOU** | New Zealand | Static TOU (Octopus NZ, Electric Kiwi, Contact Energy, Custom) |
+| **Tesla Powerwall** | Fleet API / v1r | force charge/discharge, **off-grid/reconnect** |
 
 ---
 
 ## Quick Start
 
 1. **Install** via [HACS](#installation) (custom repository)
-2. **Add Integration** — Settings > Devices & Services > Add Integration > "PowerSync"
-3. **Pick your electricity provider** and enter API credentials if required
-4. **Connect your battery system** and enter connection details, or choose **Custom / external controller** and select your existing Home Assistant telemetry entities
-5. **Done!** Sensors appear automatically and a **PowerSync dashboard** is auto-created in your sidebar. Enable [Smart Optimization](https://github.com/bolagnaise/PowerSync/wiki/Smart-Optimization) for automated scheduling, or install the [Mobile App](#mobile-app) for remote control.
-
-> **Tesla Powerwall users — two options:**
-> - **Home Assistant integration (this repo):** Free. Connects via the built-in OAuth flow at [powersync.cc](https://powersync.cc) — no developer registration, no monthly fees. Just click "Sign in with Tesla" during setup.
-> - **[PowerSync Cloud](https://powersync.cc/#cloud) ($4.99/month):** No Home Assistant required. Fully hosted service — sign in with Tesla, choose your retailer (Amber, GloBird, Energy Locals), and PowerSync handles negative-price protection, AEMO spike export, and real-time monitoring entirely in the cloud. Includes iOS/Android apps.
+2. **Add Integration** — Settings > Devices & Services > Add Integration > "Tesla v1r"
+3. **Done!** Sensors and controls appear automatically that match those that you would have previous seen using the Tesla or Tesla Fleet integraions to the extent that they are available.  Update existing dashboards and automations to use these new sensors and controls, and when you're happy that they're working, remove the old integrations..
 
 ---
 
@@ -113,20 +34,19 @@ Solar inverters that bypass the battery can be curtailed during negative feed-in
 ### Prerequisites
 
 - Home Assistant with [HACS](https://hacs.xyz/) installed
-- A supported battery system with network access, or existing Home Assistant sensors for a custom/external controller setup
-- Electricity provider credentials where required: Amber API token, Localvolts API key + Partner ID, Flow Power API key from **More > Web Data Access**, or Octopus Saving Sessions credentials
+- A Tesla Powerwall 2 or Powerwall 3 battery system with network access
 
 ### Steps
 
-[![Add Repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bolagnaise&repository=PowerSync&category=integration)
+[![Add Repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=BJReplay&repository=Tesla-v1r&category=integration)
 
 Or manually:
 
 1. Open HACS > three dots > Custom repositories
-2. Add `https://github.com/bolagnaise/PowerSync` (Category: Integration)
-3. Download PowerSync and restart Home Assistant
-4. Settings > Devices & Services > Add Integration > "PowerSync"
-5. Follow the guided setup for your provider and battery system
+2. Add `https://github.com/BHReplay/Tesla-v1r` (Category: Integration)
+3. Download Tesla-v1r and restart Home Assistant
+4. Settings > Devices & Services > Add Integration > "Tesla v1r"
+5. Follow the guided setup
 
 ---
 
@@ -134,73 +54,30 @@ Or manually:
 
 | Feature | Description | Wiki |
 |---------|-------------|------|
-| **Battery System Setup** | Tesla, FoxESS, Sigenergy, GoodWe, Sungrow, AlphaESS, ESY Sunhome, Solax Hybrid, SAJ H2/HS2, Fronius GEN24 storage, SolarEdge, Anker Solix, and custom/external controller setup guides | [Setup Guide](https://github.com/bolagnaise/PowerSync/wiki/Battery-System-Setup) |
-| **Smart Optimization** | Built-in LP optimizer calculates optimal charge/discharge schedule using prices, solar, and load. Optional controls include Profit Max, Charge By Time, auto-applied forecast reserve, selected household load history, planned EV load, and measured quota settlement for GloBird ZeroHero/ZeroCharge and CovaU SolarMax. **Solar forecasting via Solcast, Open-Meteo Solar Forecast, or Volcast must be configured for accurate scheduling.** Optional [AI Plan Explanation provider eligibility and billing guidance](https://github.com/bolagnaise/PowerSync/wiki/Smart-Optimization#ai-plan-explanation) is available in the Smart Optimization guide. | [Details](https://github.com/bolagnaise/PowerSync/wiki/Smart-Optimization) |
-| **Flexible Exports** | Reads a fail-closed operating envelope from separately certified site equipment exposed in Home Assistant. This release is monitoring-only while the required SAPN site soak is completed; active enforcement remains release-gated. PowerSync is not a CSIP-AUS client and provides no network-limit override. | [Details](https://github.com/bolagnaise/PowerSync/wiki/Smart-Optimization#network-export-limits--flexible-exports) |
-| **EV Smart Charging** | Coordinate EV charging with battery optimization — Solar, Cheapest, Deadline modes | [Details](https://github.com/bolagnaise/PowerSync/wiki/EV-Smart-Charging) |
-| **Advanced Features** | AEMO spike detection, solar curtailment, spike protection, export boost, **off-grid control** | [Details](https://github.com/bolagnaise/PowerSync/wiki/Advanced-Features) |
-| **Sensors** | Core power sensors, daily energy tracking, FoxESS Modbus sensors, optimizer status | [Full List](https://github.com/bolagnaise/PowerSync/wiki/Sensors) |
-| **Services** | Force charge/discharge, hold SOC, TOU sync, backup reserve, inverter curtailment, **off-grid/reconnect** | [Reference](https://github.com/bolagnaise/PowerSync/wiki/Services-Reference) |
-| **Troubleshooting** | Connection issues, debug logging, common fixes | [Guide](https://github.com/bolagnaise/PowerSync/wiki/Troubleshooting) |
+| **Battery System Setup** | Tesla setup guides | [Setup Guide](https://github.com/BJReplay/Tesla-v1r/wiki/Battery-System-Setup) |
+| **Sensors** | Core power sensors | [Full List](https://github.com/BJReplay/Tesla-v1r/wiki/Sensors) |
+| **Services** | Force charge/discharge, hold SOC, backup reserve, **off-grid/reconnect** | [Reference](https://github.com/BJReplay/Tesla-v1r/wiki/Services-Reference) |
+| **Troubleshooting** | Connection issues, debug logging, common fixes | [Guide](https://github.com/BJReplay/Tesla-v1r/wiki/Troubleshooting) |
 
-### Custom tariff daily supply charge
-
-For a static custom tariff uploaded to Tesla, `daily_supply_charge` is an
-optional decimal amount in the tariff currency **per day**. Set it when your
-contracted supply charge differs from the selected tariff template. If it is
-omitted, PowerSync uses that template's daily supply charge when available;
-tariffs without either value keep their existing no-amount daily-charge row.
-
----
-
-## Mobile App
-
-Remote monitoring and control via iOS and Android.
-
-**iOS:** [Join TestFlight](https://testflight.apple.com/join/FhnUtSFy) | **Android:** [Google Play](https://play.google.com/store/apps/details?id=com.powersync.mobile)
-
-### Setup
-
-1. Get your Home Assistant URL (local or Nabu Casa)
-2. Create a **Long-Lived Access Token** in your HA profile
-3. Enter URL + token in the app
-
-### Features
-
-- **Dashboard** — Live pricing, power flow, energy summary
-- **Controls** — Force charge/discharge, backup reserve, off-grid/reconnect
-- **Smart Optimization** — 24-hour battery schedule, action plan, cost tracking, Profit Max, and Charge By Time
-- **EV Charging** — Smart scheduling, solar surplus, price-level charging
-- **Automations** — Time, price, and grid-status triggers with battery/EV/grid actions
-- **Settings** — Battery, EV, provider, and optimization configuration
-- **Demo Mode** — Try the app without a Home Assistant connection using simulated data
-
-<p align="center">
-  <img src="docs/images/app-hero.png" alt="Dashboard — live energy flow" width="200"/>
-  <img src="docs/images/app-optimization.png" alt="Smart Optimization summary" width="200"/>
-  <img src="docs/images/app-action-plan.png" alt="24-hour LP action plan" width="200"/>
-</p>
-<p align="center">
-  <img src="docs/images/app-price-chart.png" alt="TOU schedule and price forecast" width="200"/>
-  <img src="docs/images/app-ev-charging.png" alt="EV Charging" width="200"/>
-  <img src="docs/images/app-settings.png" alt="Settings" width="200"/>
-</p>
 
 ---
 
 ## Sponsors
 
-<!-- sponsors --><a href="https://github.com/barry-heap"><img src="https:&#x2F;&#x2F;github.com&#x2F;barry-heap.png" width="60px" alt="User avatar: Barry Heap" /></a><a href="https://github.com/richardkeit"><img src="https:&#x2F;&#x2F;github.com&#x2F;richardkeit.png" width="60px" alt="User avatar: Richard Keit" /></a><a href="https://github.com/drsamking86-coder"><img src="https:&#x2F;&#x2F;github.com&#x2F;drsamking86-coder.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/JoelyMoley"><img src="https:&#x2F;&#x2F;github.com&#x2F;JoelyMoley.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/sgdodds"><img src="https:&#x2F;&#x2F;github.com&#x2F;sgdodds.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/philsweetnam"><img src="https:&#x2F;&#x2F;github.com&#x2F;philsweetnam.png" width="60px" alt="User avatar: PhilS" /></a><a href="https://github.com/Barbars11"><img src="https:&#x2F;&#x2F;github.com&#x2F;Barbars11.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/Teslemetry"><img src="https:&#x2F;&#x2F;github.com&#x2F;Teslemetry.png" width="60px" alt="User avatar: Teslemetry.com" /></a><a href="https://github.com/zhenya-y"><img src="https:&#x2F;&#x2F;github.com&#x2F;zhenya-y.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/rpcai"><img src="https:&#x2F;&#x2F;github.com&#x2F;rpcai.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/greiginsydney"><img src="https:&#x2F;&#x2F;github.com&#x2F;greiginsydney.png" width="60px" alt="User avatar: Greig Sheridan" /></a><a href="https://github.com/Steve-gnome"><img src="https:&#x2F;&#x2F;github.com&#x2F;Steve-gnome.png" width="60px" alt="User avatar: steve" /></a><a href="https://github.com/upperdarkness"><img src="https:&#x2F;&#x2F;github.com&#x2F;upperdarkness.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/timothyarnold1982"><img src="https:&#x2F;&#x2F;github.com&#x2F;timothyarnold1982.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/xlrate76"><img src="https:&#x2F;&#x2F;github.com&#x2F;xlrate76.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/JoshFAccord"><img src="https:&#x2F;&#x2F;github.com&#x2F;JoshFAccord.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/Muleo14"><img src="https:&#x2F;&#x2F;github.com&#x2F;Muleo14.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/hornet77al"><img src="https:&#x2F;&#x2F;github.com&#x2F;hornet77al.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/ByteSizeFlash"><img src="https:&#x2F;&#x2F;github.com&#x2F;ByteSizeFlash.png" width="60px" alt="User avatar: Darren" /></a><a href="https://github.com/mattkellaway"><img src="https:&#x2F;&#x2F;github.com&#x2F;mattkellaway.png" width="60px" alt="User avatar: Matt" /></a><a href="https://github.com/nitro182"><img src="https:&#x2F;&#x2F;github.com&#x2F;nitro182.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/permezel"><img src="https:&#x2F;&#x2F;github.com&#x2F;permezel.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/skandiah94"><img src="https:&#x2F;&#x2F;github.com&#x2F;skandiah94.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/tyler-gei"><img src="https:&#x2F;&#x2F;github.com&#x2F;tyler-gei.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/Philo21"><img src="https:&#x2F;&#x2F;github.com&#x2F;Philo21.png" width="60px" alt="User avatar: Phillip" /></a><a href="https://github.com/GregoryDC"><img src="https:&#x2F;&#x2F;github.com&#x2F;GregoryDC.png" width="60px" alt="User avatar: " /></a><!-- sponsors -->
+<!-- sponsors --><!-- sponsors -->
 
 ## Support
 
-- **Discord:** https://discord.gg/eaWDWxEWE3 — bug reports, feature requests, and support
-- **Wiki:** https://github.com/bolagnaise/PowerSync/wiki
+- **Discussions:** https://github.com/BJReplay/Tesla-v1r/discussions — bug reports, feature requests, and support
+- **Bugs / Issues:** https://github.com/BJReplay/Tesla-v1r/issues — genuine issues when you've found a real bug
+- **Wiki:** https://github.com/BJReplay/Tesla-v1r/wiki
 
 ## License
 
-Copyright (c) 2024–2026 Ben Boller. All rights reserved.
+                             Apache License
+                       Version 2.0, January 2004
+                    http://www.apache.org/licenses/
 
-Licensed under [PolyForm Noncommercial 1.0.0](LICENSE) — free for personal, hobby, and noncommercial use.
+## Credits
 
-**Commercial use is prohibited without prior written permission from the copyright holder.** This includes use within a commercial organisation, integration into a paid product or service, and redistribution as part of a commercial system. To enquire about a commercial licence, contact [dev@powersync.cc](mailto:dev@powersync.cc).
+Based on the work of Ben Boller [@Bolagnaise](https://github.com/Bolagnaise/PowerSync)
