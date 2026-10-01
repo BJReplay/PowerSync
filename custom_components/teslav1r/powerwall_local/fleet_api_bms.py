@@ -3,7 +3,7 @@
 Hand-rolled protobuf wire encoder. tesla_protocol.energy_device.transport_pb2 has field
 16 bound to GraphQLMessages; this query needs field 16 = QueryType, so we can't reuse the
 compiled module. ~40 lines of varint + length-delimited encoding mirrors the exact same
-wire format as powersync-cc/worker/src/protobuf.ts buildDeviceControllerQueryEnvelope.
+wire format as teslav1r/worker/src/protobuf.ts buildDeviceControllerQueryEnvelope.
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def _field_string(field: int, value: str) -> bytes:
 
 
 # ── DeviceControllerQuery constants ──────────────────────────────────────────
-# Verbatim from powersync-cc/worker/src/protobuf.ts:348-361.
+# Verbatim from teslav1r/worker/src/protobuf.ts:348-361.
 # CRITICAL: The ECDSA code blob signs the canonical QUERY TEXT bytes. Do not
 # reformat, add whitespace, or change encoding of DEVICE_CONTROLLER_QUERY.
 
@@ -447,7 +447,6 @@ def build_signed_routable_message(
 
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
-
     from tesla_protocol.energy_device import signed_message_pb2
 
     private_key = serialization.load_pem_private_key(private_key_pem, password=None)

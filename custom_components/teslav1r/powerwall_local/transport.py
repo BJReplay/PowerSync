@@ -29,7 +29,6 @@ from typing import Any
 import aiohttp
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-
 from tesla_protocol.energy_device import (
     authorization_types_pb2,
     device_pb2,
@@ -38,12 +37,12 @@ from tesla_protocol.energy_device import (
     transport_pb2,
 )
 
+from ..powerwall_host import normalize_powerwall_gateway_host
 from .exceptions import (
     PowerwallLocalError,
     PowerwallSignatureError,
     PowerwallUnreachableError,
 )
-from ..powerwall_host import normalize_powerwall_gateway_host
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -265,19 +264,23 @@ class TEDAPIv1rTransport:
 
         _LOGGER.debug(
             "v1r POST to %s with DIN=%s, envelope=%d bytes",
-            url, din, len(payload),
+            url,
+            din,
+            len(payload),
         )
         try:
-            async with await self._session() as sess:
-                async with sess.post(url, data=payload, headers=headers) as resp:
-                    http_status = resp.status
-                    if http_status != 200:
-                        body_text = await resp.text()
-                        _LOGGER.warning(
-                            "v1r POST non-200: %s — %s", http_status, body_text[:300]
-                        )
-                        return TEDAPIResponse(False, None, http_status=http_status)
-                    raw = await resp.read()
+            async with (
+                await self._session() as session,
+                session.post(url, data=payload, headers=headers) as resp,
+            ):
+                http_status = resp.status
+                if http_status != 200:
+                    body_text = await resp.text()
+                    _LOGGER.warning(
+                        "v1r POST non-200: %s — %s", http_status, body_text[:300]
+                    )
+                    return TEDAPIResponse(False, None, http_status=http_status)
+                raw = await resp.read()
         except asyncio.TimeoutError as err:
             raise PowerwallUnreachableError(
                 f"Timed out connecting to Powerwall gateway at {self._host}"
@@ -325,7 +328,9 @@ class TEDAPIv1rTransport:
         routable.protobuf_message_as_bytes = envelope_bytes
         routable.uuid = str(uuid.uuid4()).encode()
 
-        expires_at = math.ceil(time.time()) + (ttl_seconds if ttl_seconds is not None else _SIGNATURE_TTL_SECONDS)
+        expires_at = math.ceil(time.time()) + (
+            ttl_seconds if ttl_seconds is not None else _SIGNATURE_TTL_SECONDS
+        )
         tlv = self._build_tlv_payload(
             din, expires_at, routable.protobuf_message_as_bytes
         )
@@ -364,7 +369,11 @@ class TEDAPIv1rTransport:
         return self.build_signed_bytes(env.SerializeToString(), din)
 
     def build_signed_island_mode(
-        self, din: str, *, off_grid: bool, mode_override: int | None = None,
+        self,
+        din: str,
+        *,
+        off_grid: bool,
+        mode_override: int | None = None,
     ) -> bytes:
         """Build a signed island-mode ``RoutableMessage`` for cloud relay.
 
@@ -507,13 +516,18 @@ class TEDAPIv1rTransport:
 
         _LOGGER.info(
             "set_island_mode: mode=%s force=%s (%s) din=%s",
-            mode, force, "off_grid" if off_grid else "on_grid", din,
+            mode,
+            force,
+            "off_grid" if off_grid else "on_grid",
+            din,
         )
         resp = await self.post_v1r(env.SerializeToString(), din)
         if not resp.ok or not resp.inner_bytes:
             _LOGGER.warning(
                 "set_island_mode failed: ok=%s fault=%s http=%s",
-                resp.ok, resp.fault_name, resp.http_status,
+                resp.ok,
+                resp.fault_name,
+                resp.http_status,
             )
             return False
         try:
@@ -566,7 +580,9 @@ class TEDAPIv1rTransport:
         if not resp.ok or not resp.inner_bytes:
             _LOGGER.warning(
                 "trigger_islanding failed: ok=%s fault=%s http=%s",
-                resp.ok, resp.fault_name, resp.http_status,
+                resp.ok,
+                resp.fault_name,
+                resp.http_status,
             )
             return False
         try:
@@ -736,10 +752,11 @@ class TEDAPIv1rTransport:
             "part_number": response.device_id.part_number or None,
             "serial_number": response.device_id.serial_number or None,
             "din": response.din.value or None,
-            "firmware_version": response.firmare_version.version or None,
+            "firmware_version": response.firmware_version.version
+            or None,  # replaced response.firmare_version.version with response.firmware_version.version
             "firmware_githash": (
-                response.firmare_version.githash.hex()
-                if response.firmare_version.githash
+                response.firmware_version.githash.hex()  # replaced response.firmare_version.version with response.firmware_version.version
+                if response.firmware_version.githash  # replaced response.firmare_version.version with response.firmware_version.version
                 else None
             ),
             "device_type": _enum_suffix(
@@ -839,7 +856,9 @@ class TEDAPIv1rTransport:
                         record.identifier if record.HasField("identifier") else None
                     ),
                     "authorized_by_public_key": (
-                        base64.b64encode(record.authorized_by_public_key).decode("ascii")
+                        base64.b64encode(record.authorized_by_public_key).decode(
+                            "ascii"
+                        )
                         if record.HasField("authorized_by_public_key")
                         else None
                     ),

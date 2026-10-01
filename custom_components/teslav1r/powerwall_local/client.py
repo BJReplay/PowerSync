@@ -20,6 +20,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+import aiohttp
+
+from ..powerwall_host import normalize_powerwall_gateway_host
 from .exceptions import (
     PowerwallLocalError,
     PowerwallSignatureError,
@@ -29,7 +32,6 @@ from .fleet_api_bms import (
     build_device_controller_query_envelope,
     parse_device_controller_response,
 )
-from ..powerwall_host import normalize_powerwall_gateway_host
 from .normalization import (
     normalize_local_soc_percent,
 )
@@ -175,7 +177,9 @@ class PowerwallLocalClient:
         self._curtailment_active = False
 
         self._transport: TEDAPIv1rTransport = TEDAPIv1rTransport(
-            self._host, private_key_pem, din=din,
+            self._host,
+            private_key_pem,
+            din=din,
         )
 
     @property
@@ -230,7 +234,8 @@ class PowerwallLocalClient:
         if not resp.ok or not resp.inner_bytes:
             _LOGGER.debug(
                 "DeviceControllerQuery returned no inner bytes (fault=%s, http=%s)",
-                resp.fault_name, resp.http_status,
+                resp.fault_name,
+                resp.http_status,
             )
             return None
 
@@ -275,9 +280,7 @@ class PowerwallLocalClient:
         Returns the state integer (2=pending, 3=verified) or None if
         we couldn't determine it. Matches on our specific public key.
         """
-        our_pubkey_b64 = base64.b64encode(
-            self._transport._public_key_der
-        ).decode()
+        our_pubkey_b64 = base64.b64encode(self._transport._public_key_der).decode()
 
         if self._local_access_enabled and not is_loopback_host(self._host):
             try:
@@ -309,14 +312,17 @@ class PowerwallLocalClient:
 
     async def _verify_pairing_cloud(self, our_pubkey_b64: str) -> int | None:
         """Fall back to the existing Fleet API authorized-client lookup."""
-        if not self._fleet_api_base or not self._fleet_api_token or not self._energy_site_id:
+        if (
+            not self._fleet_api_base
+            or not self._fleet_api_token
+            or not self._energy_site_id
+        ):
             return None
 
         import aiohttp
 
         url = (
-            f"{self._fleet_api_base}/api/1/energy_sites/"
-            f"{self._energy_site_id}/command"
+            f"{self._fleet_api_base}/api/1/energy_sites/{self._energy_site_id}/command"
         )
         headers = {
             "Authorization": f"Bearer {self._fleet_api_token}",
@@ -328,14 +334,18 @@ class PowerwallLocalClient:
         )
 
         try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.post(
-                    url, json=payload, headers=headers,
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=15),
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
+                ) as resp,
+            ):
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
         except Exception as err:
             _LOGGER.warning("verify_pairing: request failed: %s", err)
             return None
@@ -344,16 +354,24 @@ class PowerwallLocalClient:
         clients: list[dict] = []
         try:
             msg = data["response"]["message"]["Payload"]["Authorization"]["Message"]
-            for key in ("ListAuthorizedClientsResponse", "list_authorized_clients_response"):
+            for key in (
+                "ListAuthorizedClientsResponse",
+                "list_authorized_clients_response",
+            ):
                 if key in msg:
                     clients = msg[key].get("clients") or msg[key].get("Clients") or []
                     break
         except (KeyError, TypeError):
             try:
                 msg = data["response"]["message"]["payload"]["authorization"]["message"]
-                for key in ("ListAuthorizedClientsResponse", "list_authorized_clients_response"):
+                for key in (
+                    "ListAuthorizedClientsResponse",
+                    "list_authorized_clients_response",
+                ):
                     if key in msg:
-                        clients = msg[key].get("clients") or msg[key].get("Clients") or []
+                        clients = (
+                            msg[key].get("clients") or msg[key].get("Clients") or []
+                        )
                         break
             except (KeyError, TypeError):
                 return None
@@ -392,9 +410,7 @@ class PowerwallLocalClient:
 
     async def schedule_max_backup(self, duration_seconds: int = 7200) -> bool:
         """Schedule a local manual max-backup event."""
-        return await self._transport.schedule_manual_backup(
-            self._din, duration_seconds
-        )
+        return await self._transport.schedule_manual_backup(self._din, duration_seconds)
 
     async def cancel_max_backup(self) -> bool:
         """Cancel the active local manual max-backup event."""
@@ -515,9 +531,12 @@ class PowerwallLocalClient:
                     err,
                 )
 
-        _LOGGER.info("go_off_grid: cloud signed device_command fallback (mode=%d)", mode)
+        _LOGGER.info(
+            "go_off_grid: cloud signed device_command fallback (mode=%d)", mode
+        )
         return await self._send_signed_device_command(
-            off_grid=True, mode_override=mode,
+            off_grid=True,
+            mode_override=mode,
         )
 
     async def reconnect_grid(self) -> bool:
@@ -565,12 +584,15 @@ class PowerwallLocalClient:
         try:
             config = await self._transport.read_config(self._din)
             if config:
-                self._saved_real_mode = config.get("default_real_mode", "self_consumption")
+                self._saved_real_mode = config.get(
+                    "default_real_mode", "self_consumption"
+                )
                 si = config.get("site_info", {})
                 self._saved_reserve_percent = int(si.get("backup_reserve_percent", 5))
                 _LOGGER.info(
                     "curtail: saved mode=%s reserve=%s%%",
-                    self._saved_real_mode, self._saved_reserve_percent,
+                    self._saved_real_mode,
+                    self._saved_reserve_percent,
                 )
         except Exception as err:
             _LOGGER.warning("curtail: failed to read pre-curtailment config: %s", err)
@@ -579,10 +601,13 @@ class PowerwallLocalClient:
             if self._saved_reserve_percent is None:
                 self._saved_reserve_percent = 5
 
-        ok = await self._transport.write_config(self._din, {
-            "default_real_mode": "backup",
-            "site_info.backup_reserve_percent": 100,
-        })
+        ok = await self._transport.write_config(
+            self._din,
+            {
+                "default_real_mode": "backup",
+                "site_info.backup_reserve_percent": 100,
+            },
+        )
         if ok:
             self._curtailment_active = True
             _LOGGER.info("curtail: config write succeeded — backup/100%%")
@@ -599,13 +624,20 @@ class PowerwallLocalClient:
             return False
 
         mode = self._saved_real_mode or "self_consumption"
-        reserve = self._saved_reserve_percent if self._saved_reserve_percent is not None else 5
+        reserve = (
+            self._saved_reserve_percent
+            if self._saved_reserve_percent is not None
+            else 5
+        )
 
         _LOGGER.info("restore: writing mode=%s reserve=%s%%", mode, reserve)
-        ok = await self._transport.write_config(self._din, {
-            "default_real_mode": mode,
-            "site_info.backup_reserve_percent": reserve,
-        })
+        ok = await self._transport.write_config(
+            self._din,
+            {
+                "default_real_mode": mode,
+                "site_info.backup_reserve_percent": reserve,
+            },
+        )
         if ok:
             self._curtailment_active = False
             _LOGGER.info("restore: config write succeeded")
@@ -618,7 +650,10 @@ class PowerwallLocalClient:
         return self._curtailment_active
 
     async def _send_signed_device_command(
-        self, *, off_grid: bool, mode_override: int | None = None,
+        self,
+        *,
+        off_grid: bool,
+        mode_override: int | None = None,
     ) -> bool:
         """Send a signed island-mode command via cloud ``device_command``.
 
@@ -626,13 +661,14 @@ class PowerwallLocalClient:
         cloud ``device_command`` endpoint as ``routable_message``. The
         gateway verifies our RSA signature from the paired key.
         """
-        if not self._fleet_api_base or not self._fleet_api_token or not self._energy_site_id:
+        if (
+            not self._fleet_api_base
+            or not self._fleet_api_token
+            or not self._energy_site_id
+        ):
             return False
         if not self._transport or not self._din:
             return False
-
-        import base64
-        import aiohttp
 
         action = "off_grid" if off_grid else "on_grid"
         url = (
@@ -647,17 +683,25 @@ class PowerwallLocalClient:
         # Both PW2 and PW3: mode=6 off-grid (force=True), mode=1 reconnect
         try:
             signed_bytes = self._transport.build_signed_island_mode(
-                self._din, off_grid=off_grid, mode_override=mode_override,
+                self._din,
+                off_grid=off_grid,
+                mode_override=mode_override,
             )
         except Exception as err:
-            _LOGGER.error("signed_device_command: failed to build signed bytes: %s", err)
+            _LOGGER.error(
+                "signed_device_command: failed to build signed bytes: %s", err
+            )
             return False
 
         msg_b64 = base64.b64encode(signed_bytes).decode()
-        actual_mode = mode_override if mode_override is not None else (6 if off_grid else 1)
+        actual_mode = (
+            mode_override if mode_override is not None else (6 if off_grid else 1)
+        )
         _LOGGER.info(
             "signed_device_command: %s — setIslandMode(mode=%d) %d bytes",
-            action, actual_mode, len(signed_bytes),
+            action,
+            actual_mode,
+            len(signed_bytes),
         )
 
         # Use "routable_message" field (NOT "energy_device_message").
@@ -674,22 +718,26 @@ class PowerwallLocalClient:
         }
 
         try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.post(
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
                     url,
                     json=payload,
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=35),
-                ) as resp:
-                    body = await resp.text()
-                    _LOGGER.info(
-                        "signed_device_command %s: HTTP %d — %s",
-                        action, resp.status, body[:500],
-                    )
-                    if resp.status != 200:
-                        return False
+                ) as resp,
+            ):
+                body = await resp.text()
+                _LOGGER.info(
+                    "signed_device_command %s: HTTP %d — %s",
+                    action,
+                    resp.status,
+                    body[:500],
+                )
+                if resp.status != 200:
+                    return False
 
-                    return resp.status == 200 and "response" in body
+                return resp.status == 200 and "response" in body
 
         except Exception as err:
             _LOGGER.error("signed_device_command %s error: %s", action, err)
@@ -702,18 +750,12 @@ class PowerwallLocalClient:
         posts it to the Fleet API device_command endpoint, and returns the decoded
         JSON payload from the gateway response. Returns None on any failure.
         """
-        if not (self._fleet_api_base and self._fleet_api_token and self._energy_site_id):
+        if not (
+            self._fleet_api_base and self._fleet_api_token and self._energy_site_id
+        ):
             return None
         if not (self._transport and self._din):
             return None
-
-        import base64
-        import aiohttp
-
-        from .fleet_api_bms import (
-            build_device_controller_query_envelope,
-            parse_device_controller_response,
-        )
 
         try:
             envelope = build_device_controller_query_envelope(self._din)
@@ -722,7 +764,9 @@ class PowerwallLocalClient:
                 envelope, self._din, ttl_seconds=300
             )
         except Exception as err:
-            _LOGGER.error("fetch_device_controller_json: failed to build signed bytes: %s", err)
+            _LOGGER.error(
+                "fetch_device_controller_json: failed to build signed bytes: %s", err
+            )
             return None
 
         msg_b64 = base64.b64encode(signed).decode()
@@ -744,21 +788,24 @@ class PowerwallLocalClient:
         }
 
         try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.post(
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
                     url,
                     json=payload,
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=35),
-                ) as resp:
-                    if resp.status != 200:
-                        body_text = await resp.text()
-                        _LOGGER.warning(
-                            "fetch_device_controller_json: HTTP %d — %s",
-                            resp.status, body_text[:400],
-                        )
-                        return None
-                    body = await resp.json()
+                ) as resp,
+            ):
+                if resp.status != 200:
+                    body_text = await resp.text()
+                    _LOGGER.warning(
+                        "fetch_device_controller_json: HTTP %d — %s",
+                        resp.status,
+                        body_text[:400],
+                    )
+                    return None
+                body = await resp.json()
         except Exception as err:
             _LOGGER.error("fetch_device_controller_json: request error: %s", err)
             return None
@@ -774,7 +821,9 @@ class PowerwallLocalClient:
         try:
             result = parse_device_controller_response(base64.b64decode(envelope_b64))
             if result is None:
-                _LOGGER.warning("fetch_device_controller_json: failed to extract text from envelope")
+                _LOGGER.warning(
+                    "fetch_device_controller_json: failed to extract text from envelope"
+                )
             return result
         except Exception as err:
             _LOGGER.warning("fetch_device_controller_json: decode error: %s", err)
@@ -819,6 +868,7 @@ _DCQ_ISLAND_MODE_TO_GRID_STATUS = {
     "OffGrid": "SystemIslandedActive",
     "Normal": "SystemGridConnected",
 }
+
 
 def _snapshot_from_dcq(
     dcq: dict[str, Any],
@@ -890,9 +940,7 @@ def _snapshot_from_dcq(
         else None
     )
     grid_charging_enabled = (
-        not disallow_grid_charging
-        if isinstance(disallow_grid_charging, bool)
-        else None
+        not disallow_grid_charging if isinstance(disallow_grid_charging, bool) else None
     )
     grid_export_rule = (
         site_info.get("customer_preferred_export_rule")
@@ -903,7 +951,11 @@ def _snapshot_from_dcq(
         grid_export_rule = None
 
     # Alerts: DCQ flat list of names; coerce to dict shape consumers expect.
-    alerts_active = control.get("alerts", {}).get("active") if isinstance(control.get("alerts"), dict) else None
+    alerts_active = (
+        control.get("alerts", {}).get("active")
+        if isinstance(control.get("alerts"), dict)
+        else None
+    )
     alerts: list[dict[str, Any]] | None = None
     if isinstance(alerts_active, list):
         alerts = [

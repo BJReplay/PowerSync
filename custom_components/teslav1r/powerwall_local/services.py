@@ -1,8 +1,8 @@
 """Home Assistant services wrapping local Powerwall control.
 
 Services:
-    power_sync.powerwall_go_off_grid   - disconnect from grid (islanding)
-    power_sync.powerwall_reconnect_grid - reconnect to grid
+    teslav1r.powerwall_go_off_grid   - disconnect from grid (islanding)
+    teslav1r.powerwall_reconnect_grid - reconnect to grid
 
 Both services look up the PowerSync config entry, check the paired state,
 enforce the SOC safety floor, and dispatch to ``PowerwallLocalClient``.
@@ -12,9 +12,8 @@ Callable from automations, the dashboard, and the LP optimizer.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
-import voluptuous as vol
+import probatio
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 
@@ -26,23 +25,31 @@ from ..const import (
 )
 from .views import _get_entry, ensure_client, ensure_coordinator
 
-if TYPE_CHECKING:
-    pass
-
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_GO_OFF_GRID = "powerwall_go_off_grid"
 SERVICE_RECONNECT_GRID = "powerwall_reconnect_grid"
 SERVICE_VERIFY_PAIRING = "powerwall_verify_pairing"
 
-GO_OFF_GRID_SCHEMA = vol.Schema(
+validator = probatio
+
+Schema = validator.Schema
+Required = validator.Required
+Optional = validator.Optional
+All = validator.All
+Coerce = validator.Coerce
+Range = validator.Range
+
+
+
+GO_OFF_GRID_SCHEMA = Schema(
     {
-        vol.Optional("bypass_soc_check", default=False): bool,
-        vol.Optional("mode"): vol.All(int, vol.Range(min=1, max=10)),
+        Optional("bypass_soc_check", default=False): bool,
+        Optional("mode"): All(int, Range(min=1, max=10)),
     }
 )
 
-RECONNECT_SCHEMA = vol.Schema({})
+RECONNECT_SCHEMA = Schema({})
 
 
 async def _handle_go_off_grid(hass: HomeAssistant, call: ServiceCall) -> None:
@@ -152,5 +159,5 @@ def register_services(hass: HomeAssistant) -> None:
             DOMAIN,
             SERVICE_VERIFY_PAIRING,
             verify_pairing,
-            schema=vol.Schema({}),
+            schema=Schema({}),
         )

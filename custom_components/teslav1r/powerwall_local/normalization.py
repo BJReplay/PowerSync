@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # Powerwall keeps a hidden low-SOE reserve. Local hardware/config values include
 # that reserve, while Tesla app/cloud UI presents the user-facing reserve target.
 DEFAULT_LOW_SOE_RESERVE_PCT = 5.0
@@ -70,11 +69,9 @@ def normalize_local_backup_reserve_percent(
         return 100
     if local_reserve <= low_soe_reserve:
         return 0
-    return int(
-        round(
+    return round(
             max(0.0, min(100.0, local_reserve - low_soe_reserve))
         )
-    )
 
 
 def local_backup_reserve_write_percent(
@@ -88,8 +85,6 @@ def local_backup_reserve_write_percent(
     low_soe_reserve = _coerce_low_soe_reserve_percent(low_soe_reserve_pct)
     if reserve >= 100:
         return 100
-    return int(
-        round(
+    return round(
             max(0.0, min(100.0, reserve + low_soe_reserve))
         )
-    )

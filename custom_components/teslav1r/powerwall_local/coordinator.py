@@ -585,9 +585,6 @@ class PowerwallLocalCoordinator(DataUpdateCoordinator[PowerwallSnapshot | None])
                 )
             for coord_key in (
                 "tesla_coordinator",
-                "sigenergy_coordinator",
-                "sungrow_coordinator",
-                "foxess_coordinator",
             ):
                 data = getattr(entry_data.get(coord_key), "data", None)
                 if not data:

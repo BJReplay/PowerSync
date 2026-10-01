@@ -33,11 +33,11 @@ import asyncio
 import base64
 import json
 import logging
-import struct
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from enum import Enum, IntEnum
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 import aiohttp
 
@@ -46,10 +46,8 @@ _LOGGER = logging.getLogger(__name__)
 SIGNALING_URL = "wss://signaling.vn.teslamotors.com/v1/mobile"
 TESLA_APP_KEY = "D0C585CC5108DF5152B56EC365D5A89523765C18"
 
-# Hermes JWT exchange endpoints — try PowerSync proxy first (works with
-# psync_ tokens), then Fleet API, then owner-api.
+# Hermes JWT exchange endpoints — Fleet API, then owner-api.
 HERMES_JWT_URLS = [
-    "https://api.powersync.cc/api/proxy/hermes_jwt",
     "https://fleet-api.prd.na.vn.cloud.tesla.com/api/1/users/jwt/hermes",
     "https://owner-api.teslamotors.com/api/1/users/jwt/hermes",
 ]
@@ -182,9 +180,7 @@ def _build_client_ack(txid: bytes, message_id: bytes | None = None) -> bytes:
     if message_id:
         # field 12 (messageId): wire type 2 (length-delimited)
         inner += (
-            _write_varint((12 << 3) | 2)
-            + _write_varint(len(message_id))
-            + message_id
+            _write_varint((12 << 3) | 2) + _write_varint(len(message_id)) + message_id
         )
     # Wrap in HermesMessage field 1
     outer = _write_varint((1 << 3) | 2) + _write_varint(len(inner)) + inner
@@ -230,9 +226,7 @@ def _missing_scope_hint(scopes: list[str]) -> str:
     if not scopes:
         return ""
 
-    missing = [
-        scope for scope in HERMES_LIKELY_REQUIRED_SCOPES if scope not in scopes
-    ]
+    missing = [scope for scope in HERMES_LIKELY_REQUIRED_SCOPES if scope not in scopes]
     if not missing:
         return ""
 
@@ -298,7 +292,9 @@ class TeslaSignalingClient:
         # Cached hermes JWT
         self._hermes_jwt: str | None = None
         self._hermes_jwt_obtained_at: float = 0
-        self._hermes_jwt_is_fallback = False  # True when using raw token, not a real JWT
+        self._hermes_jwt_is_fallback = (
+            False  # True when using raw token, not a real JWT
+        )
         self._working_jwt_url: str | None = None
         self._auth_denied = False
         self._unavailable_reason: str | None = None
@@ -367,9 +363,7 @@ class TeslaSignalingClient:
             _LOGGER.debug("signaling: already running")
             return
         self._stop_event.clear()
-        self._task = asyncio.create_task(
-            self._run_loop(), name="tesla_signaling"
-        )
+        self._task = asyncio.create_task(self._run_loop(), name="tesla_signaling")
         _LOGGER.info("signaling: background task started (din=%s)", self._din)
 
     async def stop(self) -> None:
@@ -428,98 +422,98 @@ class TeslaSignalingClient:
 
         for url in urls_to_try:
             try:
-                async with aiohttp.ClientSession() as sess:
-                    async with sess.post(
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.post(
                         url,
                         json=payload,
                         headers=headers,
                         timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status in (401, 403):
-                            body = await resp.text()
-                            if _is_missing_scope_response(resp.status, body):
-                                self._missing_scope_rejection = True
-                                scopes = _decode_jwt_scopes(access_token)
-                                _LOGGER.warning(
-                                    "signaling: hermes JWT exchange at %s "
-                                    "rejected the access token for missing scopes. "
-                                    "Token scopes=%s Response: %s",
-                                    url,
-                                    scopes if scopes else "?",
-                                    body[:300],
-                                )
-                            else:
-                                _LOGGER.info(
-                                    "signaling: hermes JWT exchange at %s "
-                                    "returned %d — trying next endpoint. "
-                                    "Response: %s",
-                                    url,
-                                    resp.status,
-                                    body[:200],
-                                )
-                            continue
-                        if resp.status != 200:
-                            body = await resp.text()
-                            if _is_hermes_unsupported_response(resp.status, body):
-                                reason = (
-                                    "Tesla does not support Hermes JWT exchange for "
-                                    "this access token; signed_command is required"
-                                )
-                                self._mark_unavailable(reason)
-                                _LOGGER.warning(
-                                    "signaling: Tesla rejected Hermes JWT exchange "
-                                    "with a permanent signed_command requirement. "
-                                    "Stopping endpoint retries and raw-token fallback."
-                                )
-                                return None
-                            # The PowerSync.cc proxy returns structured JSON with
-                            # `error`, `detail`, and `token_scopes` from the
-                            # upstream Tesla response. Log those explicitly so
-                            # we don't lose `token_scopes` to the 200-char clip.
-                            err_code = ""
-                            detail = ""
-                            scopes: list = []
-                            try:
-                                parsed = json.loads(body)
-                                if isinstance(parsed, dict):
-                                    err_code = str(parsed.get("error", ""))
-                                    detail = str(parsed.get("detail", ""))
-                                    raw_scopes = parsed.get("token_scopes")
-                                    if isinstance(raw_scopes, list):
-                                        scopes = raw_scopes
-                            except (ValueError, TypeError):
-                                pass
+                    ) as resp,
+                ):
+                    if resp.status in (401, 403):
+                        body = await resp.text()
+                        if _is_missing_scope_response(resp.status, body):
+                            self._missing_scope_rejection = True
+                            scopes = _decode_jwt_scopes(access_token)
                             _LOGGER.warning(
                                 "signaling: hermes JWT exchange at %s "
-                                "failed (%d) error=%s scopes=%s detail=%s",
+                                "rejected the access token for missing scopes. "
+                                "Token scopes=%s Response: %s",
+                                url,
+                                scopes if scopes else "?",
+                                body[:300],
+                            )
+                        else:
+                            _LOGGER.info(
+                                "signaling: hermes JWT exchange at %s "
+                                "returned %d — trying next endpoint. "
+                                "Response: %s",
                                 url,
                                 resp.status,
-                                err_code or "?",
-                                scopes if scopes else "?",
-                                (detail or body)[:400],
+                                body[:200],
                             )
-                            continue
-
-                        data = await resp.json()
-                        jwt = data.get("token")
-                        if not jwt:
+                        continue
+                    if resp.status != 200:
+                        body = await resp.text()
+                        if _is_hermes_unsupported_response(resp.status, body):
+                            reason = (
+                                "Tesla does not support Hermes JWT exchange for "
+                                "this access token; signed_command is required"
+                            )
+                            self._mark_unavailable(reason)
                             _LOGGER.warning(
-                                "signaling: hermes JWT response missing "
-                                "'token' from %s: %s",
-                                url,
-                                str(data)[:200],
+                                "signaling: Tesla rejected Hermes JWT exchange "
+                                "with a permanent signed_command requirement. "
+                                "Stopping endpoint retries and raw-token fallback."
                             )
-                            continue
-
-                        self._hermes_jwt = jwt
-                        self._hermes_jwt_obtained_at = time.monotonic()
-                        self._hermes_jwt_is_fallback = False
-                        self._working_jwt_url = url
-                        self._fallback_rejection_count = 0
-                        _LOGGER.info(
-                            "signaling: hermes JWT obtained from %s", url
+                            return None
+                        # The PowerSync.cc proxy returns structured JSON with
+                        # `error`, `detail`, and `token_scopes` from the
+                        # upstream Tesla response. Log those explicitly so
+                        # we don't lose `token_scopes` to the 200-char clip.
+                        err_code = ""
+                        detail = ""
+                        scopes: list = []
+                        try:
+                            parsed = json.loads(body)
+                            if isinstance(parsed, dict):
+                                err_code = str(parsed.get("error", ""))
+                                detail = str(parsed.get("detail", ""))
+                                raw_scopes = parsed.get("token_scopes")
+                                if isinstance(raw_scopes, list):
+                                    scopes = raw_scopes
+                        except (ValueError, TypeError):
+                            pass
+                        _LOGGER.warning(
+                            "signaling: hermes JWT exchange at %s "
+                            "failed (%d) error=%s scopes=%s detail=%s",
+                            url,
+                            resp.status,
+                            err_code or "?",
+                            scopes if scopes else "?",
+                            (detail or body)[:400],
                         )
-                        return jwt
+                        continue
+
+                    data = await resp.json()
+                    jwt = data.get("token")
+                    if not jwt:
+                        _LOGGER.warning(
+                            "signaling: hermes JWT response missing "
+                            "'token' from %s: %s",
+                            url,
+                            str(data)[:200],
+                        )
+                        continue
+
+                    self._hermes_jwt = jwt
+                    self._hermes_jwt_obtained_at = time.monotonic()
+                    self._hermes_jwt_is_fallback = False
+                    self._working_jwt_url = url
+                    self._fallback_rejection_count = 0
+                    _LOGGER.info("signaling: hermes JWT obtained from %s", url)
+                    return jwt
 
             except Exception as err:
                 _LOGGER.warning(
@@ -595,9 +589,7 @@ class TeslaSignalingClient:
             )
             _LOGGER.info("signaling: reconnecting in %.0fs", delay)
             try:
-                await asyncio.wait_for(
-                    self._stop_event.wait(), timeout=delay
-                )
+                await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
                 # stop_event was set during the wait — exit
                 return
             except asyncio.TimeoutError:
@@ -645,9 +637,7 @@ class TeslaSignalingClient:
         self._connected_since = connect_time
         self._consecutive_failures = 0
         self._total_connects += 1
-        _LOGGER.info(
-            "signaling: connected (total connects: %d)", self._total_connects
-        )
+        _LOGGER.info("signaling: connected (total connects: %d)", self._total_connects)
 
         await self._listen()
 
@@ -660,7 +650,8 @@ class TeslaSignalingClient:
             _LOGGER.warning(
                 "signaling: connection lasted only %.1fs — "
                 "server may be rejecting us (failure count: %d)",
-                duration, self._consecutive_failures,
+                duration,
+                self._consecutive_failures,
             )
 
     async def _listen(self) -> None:
@@ -690,14 +681,14 @@ class TeslaSignalingClient:
                 _LOGGER.info(
                     "signaling: server closed connection "
                     "(type=%s, close_code=%s, extra=%s)",
-                    msg.type, close_code, repr(msg.data)[:200],
+                    msg.type,
+                    close_code,
+                    repr(msg.data)[:200],
                 )
                 return
 
             elif msg.type == aiohttp.WSMsgType.ERROR:
-                _LOGGER.warning(
-                    "signaling: WebSocket error: %s", self._ws.exception()
-                )
+                _LOGGER.warning("signaling: WebSocket error: %s", self._ws.exception())
                 return
 
     async def _handle_binary(self, data: bytes) -> None:
@@ -715,7 +706,8 @@ class TeslaSignalingClient:
         if not fields:
             _LOGGER.warning(
                 "signaling: unparseable binary frame (%d bytes): %s",
-                len(data), data[:100].hex(),
+                len(data),
+                data[:100].hex(),
             )
             return
 
@@ -741,8 +733,7 @@ class TeslaSignalingClient:
                 self._fallback_rejection_count += 1
                 if self._fallback_rejection_count >= 3:
                     reason = (
-                        "Hermes JWT exchange failed and raw token fallback was "
-                        "rejected"
+                        "Hermes JWT exchange failed and raw token fallback was rejected"
                     )
                     _LOGGER.warning(
                         "signaling: hermes JWT exchange repeatedly failed and raw "
@@ -783,7 +774,9 @@ class TeslaSignalingClient:
 
         _LOGGER.info(
             "signaling: received %s (cmd_type=%s, payload=%s)",
-            cmd_name, cmd_type, payload_text[:100] if payload_text else "empty",
+            cmd_name,
+            cmd_type,
+            payload_text[:100] if payload_text else "empty",
         )
 
         # ACK any message with a txid to keep the session healthy
