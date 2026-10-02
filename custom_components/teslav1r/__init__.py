@@ -14,9 +14,6 @@ from typing import Any
 import aiohttp
 from homeassistant.util import dt as dt_util
 
-from .automations.ev_phase_allocator import (
-    normalize_home_power_settings as normalize_home_power_settings,
-)
 from .settings_metadata import optimizer_settings_groups
 from .tesla_calibration import (
     CALIBRATION_SOURCE_LOCAL_ALERT as CALIBRATION_SOURCE_LOCAL_ALERT,
