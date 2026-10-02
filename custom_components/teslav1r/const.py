@@ -141,14 +141,6 @@ AEMO_REGIONS = {
     "TAS1": "TAS - Tasmania",
 }
 
-FLOW_POWER_KWATCH_REGIONS = {
-    "NSW1": "nsw",
-    "VIC1": "vic",
-    "QLD1": "qld",
-    "SA1": "sa",
-    "TAS1": "tas",
-}
-
 # Data coordinator update intervals
 UPDATE_INTERVAL_PRICES = timedelta(minutes=5)  # Amber updates every 5 minutes
 UPDATE_INTERVAL_ENERGY = timedelta(seconds=15)  # Tesla energy data every 15 seconds
@@ -319,7 +311,7 @@ def normalize_grid_charge_blackout_windows(value) -> list[dict[str, str]]:
         except json.JSONDecodeError:
             raw = [part.strip() for part in raw.split(",") if part.strip()]
     if not isinstance(raw, list):
-        raise ValueError("blackout windows must be a list")
+        raise TypeError("blackout windows must be a list")
 
     canonical: set[tuple[str, str]] = set()
     for item in raw:
@@ -330,7 +322,7 @@ def normalize_grid_charge_blackout_windows(value) -> list[dict[str, str]]:
         else:
             raise ValueError("blackout windows must contain start/end ranges")
         if not isinstance(start, str) or not isinstance(end, str):
-            raise ValueError("blackout times must be strings")
+            raise TypeError("blackout times must be strings")
         for clock in (start, end):
             if len(clock) != 5 or clock[2] != ":" or not (
                 clock[:2].isdigit() and clock[3:].isdigit()
@@ -440,8 +432,6 @@ SENSOR_KEY_TO_FAMILY: dict[str, str] = {
     "min_soc": SENSOR_FAMILY_BATTERY,
     "daily_battery_charge": SENSOR_FAMILY_BATTERY,
     "daily_battery_discharge": SENSOR_FAMILY_BATTERY,
-    "daily_battery_charge_foxess": SENSOR_FAMILY_BATTERY,
-    "daily_battery_discharge_foxess": SENSOR_FAMILY_BATTERY,
     # Solar & Inverter
     "solar_power": SENSOR_FAMILY_SOLAR_INVERTER,
     "daily_solar_energy": SENSOR_FAMILY_SOLAR_INVERTER,
