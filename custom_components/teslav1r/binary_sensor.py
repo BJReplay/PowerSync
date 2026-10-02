@@ -6,8 +6,8 @@ import logging
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
-    BinarySensorEntity,
     BinarySensorDeviceClass,
+    BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
@@ -15,15 +15,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    DOMAIN,
-    CONF_TESLA_ENERGY_SITE_ID,
     CONF_POWERWALL_LOCAL_PAIRED,
-    family_device_info,
-    powerwall_device_info,
+    CONF_TESLA_ENERGY_SITE_ID,
+    DOMAIN,
     SENSOR_FAMILY_BATTERY,
     SENSOR_FAMILY_CONTROLS,
     SENSOR_FAMILY_GRID_HOME,
     TESLA_CAPABILITY_WAIT_SECONDS,
+    family_device_info,
+    powerwall_device_info,
 )
 from .tesla_alerts import powerwall_alert_attributes, split_powerwall_alerts
 

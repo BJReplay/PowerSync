@@ -116,9 +116,7 @@ class PowerwallPairButton(_PowerwallPairButtonBase):
             .get("powerwall_local", {})
         )
         mgr = runtime.get("pairing_manager")
-        if mgr is not None and mgr.is_running:
-            return False
-        return True
+        return not (mgr is not None and mgr.is_running)
 
     async def async_press(self) -> None:
         already_paired = bool(
@@ -216,7 +214,6 @@ async def _start_pairing_with_notifications(
     # Lazy imports — these modules are heavy and only needed when the user
     # actually presses the button.
     from .powerwall_local.pairing import (
-        PairingState,
         PowerwallPairingError,
         PowerwallPairingManager,
     )
