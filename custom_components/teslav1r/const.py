@@ -43,6 +43,7 @@ CONF_AUTO_UPDATE_ENABLED = "auto_update_enabled"
 CONF_AUTO_UPDATE_TIME = "auto_update_time"
 DEFAULT_AUTO_UPDATE_TIME = "03:00"
 CONF_TIMEZONE = "timezone"
+CONF_BATTERY_CURTAILMENT_ENABLED = "battery_curtailment_enabled"
 
 # Automations - OpenWeatherMap API for weather triggers
 
