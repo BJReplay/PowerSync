@@ -7,7 +7,7 @@ import logging
 import math
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import aiohttp
@@ -25,10 +25,6 @@ from .const import (
     TESLA_SITE_INFO_CACHE_TTL_SECONDS,
     TESLA_V1R_USER_AGENT,
     UPDATE_INTERVAL_ENERGY,
-)
-from .demand_charge_config import (
-    normalize_demand_charge_billing_day,
-    normalize_demand_charge_days,
 )
 from .sensitive_logging import obfuscate_log_arg, obfuscate_vin_tokens
 from .tesla_grid_control import async_set_tesla_grid_charging_confirmed
@@ -48,7 +44,6 @@ LIFETIME_TOTAL_KEYS = (
     "lifetime_home_kwh",
 )
 
-
 _TERMINAL_GRID_STATUS_VALUES = {
     "active": "Active",
     "systemgridconnected": "SystemGridConnected",
@@ -58,13 +53,11 @@ _TERMINAL_GRID_STATUS_VALUES = {
     "systemislandedactive": "SystemIslandedActive",
 }
 
-
 def _terminal_grid_status(value: Any) -> str | None:
     """Return a canonical terminal grid status, or None while state is unknown."""
     if not isinstance(value, str):
         return None
     return _TERMINAL_GRID_STATUS_VALUES.get(value.strip().lower())
-
 
 def _grid_status_is_off_grid(value: Any) -> bool | None:
     """Return the terminal grid mode without collapsing unknown transitions."""
@@ -72,7 +65,6 @@ def _grid_status_is_off_grid(value: Any) -> bool | None:
     if status is None:
         return None
     return status in {"Inactive", "Islanded", "Off-Grid", "SystemIslandedActive"}
-
 
 def normalize_custom_power_kw(value: Any, unit: str = "") -> float | None:
     """Normalize custom HA power telemetry to finite kW."""
@@ -94,7 +86,6 @@ def normalize_custom_power_kw(value: Any, unit: str = "") -> float | None:
         return numeric_value
     return numeric_value / 1000.0 if abs(numeric_value) > 100 else numeric_value
 
-
 def _finite_float(value: Any) -> float | None:
     """Return a finite numeric value, preserving missing/invalid telemetry."""
     if isinstance(value, bool):
@@ -105,7 +96,6 @@ def _finite_float(value: Any) -> float | None:
         return None
     return numeric_value if math.isfinite(numeric_value) else None
 
-
 def _inverter_poll_datetime(attrs: dict[str, Any]) -> datetime | None:
     """Parse the AC inverter poll timestamp when one is available."""
     raw_value = attrs.get("last_poll")
@@ -115,7 +105,6 @@ def _inverter_poll_datetime(attrs: dict[str, Any]) -> datetime | None:
         return datetime.fromisoformat(str(raw_value).replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return None
-
 
 def _is_night_for_solar_telemetry(hass: HomeAssistant) -> bool:
     """Return whether real solar telemetry should be impossible or near-zero."""
@@ -132,7 +121,6 @@ def _is_night_for_solar_telemetry(hass: HomeAssistant) -> bool:
     local_hour = dt_util.now().hour
     return local_hour >= 18 or local_hour < 6
 
-
 def _stored_battery_health_capacity_kwh(
     hass: HomeAssistant, entry_id: str
 ) -> float | None:
@@ -144,23 +132,6 @@ def _stored_battery_health_capacity_kwh(
     except (TypeError, ValueError):
         return None
     return round(capacity_kwh, 2) if capacity_kwh > 0 else None
-
-
-def _flow_power_export_rate_dollars(config_entry: Any, state: str) -> float:
-    """Return configured Flow Power Happy Hour export rate in $/kWh."""
-    from .const import CONF_FLOW_POWER_EXPORT_RATE, FLOW_POWER_EXPORT_RATES
-
-    configured_rate = config_entry.options.get(
-        CONF_FLOW_POWER_EXPORT_RATE,
-        config_entry.data.get(CONF_FLOW_POWER_EXPORT_RATE),
-    )
-    if configured_rate not in (None, ""):
-        try:
-            return max(0.0, float(configured_rate) / 100)
-        except (ValueError, TypeError):
-            pass
-
-    return FLOW_POWER_EXPORT_RATES.get(state, 0.0)
 
 
 class SensitiveDataFilter(logging.Filter):
@@ -365,10 +336,8 @@ class SensitiveDataFilter(logging.Filter):
 
         return True
 
-
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.addFilter(SensitiveDataFilter())
-
 
 def _parse_retry_after(response: aiohttp.ClientResponse) -> float | None:
     """Parse Retry-After header from an HTTP response.
@@ -395,7 +364,6 @@ def _parse_retry_after(response: aiohttp.ClientResponse) -> float | None:
         return max(1.0, min(delay, 300.0))  # Clamp 1-300s
     except (ValueError, TypeError):
         return None
-
 
 async def _fetch_with_retry(
     session: aiohttp.ClientSession,
@@ -527,49 +495,6 @@ async def _fetch_with_retry(
 
     # All retries failed
     raise last_error or UpdateFailed("All retry attempts failed")
-
-
-def _merge_amber_forecasts(forecast_5min: list, forecast_30min: list) -> list:
-    """Merge 5-min near-term with 30-min extended horizon, avoiding overlap.
-
-    5-min data covers today at NEM dispatch resolution; 30-min extends ~40h.
-    We keep all 5-min entries and only append 30-min entries that start at or
-    after the latest 5-min interval end (nemTime).
-    """
-    if not forecast_5min:
-        return forecast_30min or []
-    if not forecast_30min:
-        return forecast_5min or []
-
-    # Find latest nemTime (interval END) in 5-min data
-    latest_5min_end = max(
-        (e.get("nemTime", "") for e in forecast_5min),
-        default="",
-    )
-    if not latest_5min_end:
-        return forecast_30min
-
-    try:
-        boundary = datetime.fromisoformat(latest_5min_end.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return forecast_30min
-
-    # Keep only 30-min entries whose start is at or after the boundary
-    filtered_30min = []
-    for entry in forecast_30min:
-        nem = entry.get("nemTime", "")
-        dur = entry.get("duration", 30)
-        if nem:
-            try:
-                end = datetime.fromisoformat(nem.replace("Z", "+00:00"))
-                start = end - timedelta(minutes=dur)
-                if start >= boundary:
-                    filtered_30min.append(entry)
-            except (ValueError, TypeError):
-                filtered_30min.append(entry)  # keep if unparseable
-
-    return list(forecast_5min) + filtered_30min
-
 
 class TeslaEnergyCoordinator(DataUpdateCoordinator):
     """Coordinator to fetch Tesla energy data from Tesla API (Fleet API)."""
@@ -2019,366 +1944,6 @@ class TeslaEnergyCoordinator(DataUpdateCoordinator):
         await self.async_flush_lifetime_totals()
         return totals
 
-
-class DemandChargeCoordinator(DataUpdateCoordinator):
-    """Coordinator to track demand charges."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        energy_coordinator: DataUpdateCoordinator,
-        enabled: bool = False,
-        rate: float = 0.0,
-        start_time: str = "14:00",
-        end_time: str = "20:00",
-        days: str = "All Days",
-        billing_day: int = 1,
-        daily_supply_charge: float = 0.0,
-        monthly_supply_charge: float = 0.0,
-        entry_id: str | None = None,
-    ) -> None:
-        """Initialize the coordinator."""
-        self.tesla_coordinator = energy_coordinator
-        self.enabled = enabled
-        self.rate = rate
-        self.start_time = start_time
-        self.end_time = end_time
-        self.days = normalize_demand_charge_days(days)
-        self.billing_day = normalize_demand_charge_billing_day(billing_day)
-        self.daily_supply_charge = daily_supply_charge
-        self.monthly_supply_charge = monthly_supply_charge
-
-        # Track peak demand (persists across coordinator updates)
-        self._peak_demand_kw = 0.0
-        # Never replace an unknown restored peak with the constructor's zero.
-        # A Store error can otherwise turn a same-cycle peak into a plausible
-        # but incorrect zero during the next unload or update.
-        self._peak_demand_restore_unresolved = False
-        self._peak_demand_restore_error_logged = False
-        # A failed write leaves the in-memory value ahead of durable storage.
-        # Do not report that value as settled accounting until a retry succeeds.
-        self._peak_demand_persistence_unresolved = False
-        self._peak_demand_save_error_logged = False
-        self._last_billing_day_check = None
-        self._store = (
-            Store(hass, 1, f"{DOMAIN}.demand_charge.{entry_id}") if entry_id else None
-        )
-
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=f"{DOMAIN}_demand_charge",
-            update_interval=timedelta(minutes=1),  # Check every minute
-        )
-
-    def _billing_cycle_key(self, now: datetime) -> str:
-        """Return the configured billing cycle containing ``now``."""
-        year, month = now.year, now.month
-        if now.day < self.billing_day:
-            if month == 1:
-                year, month = year - 1, 12
-            else:
-                month -= 1
-        return f"{year:04d}-{month:02d}-{self.billing_day:02d}"
-
-    def _store_identity(self) -> dict[str, Any]:
-        """Return settings that define which samples belong to this peak."""
-        return {
-            "billing_day": self.billing_day,
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "days": self.days,
-        }
-
-    async def async_load(self) -> None:
-        """Restore a peak only when it belongs to this configured cycle."""
-        if self._store is None:
-            return
-        try:
-            stored = await self._store.async_load()
-        except Exception as err:
-            self._mark_peak_restore_unresolved("could not load", err)
-            return
-        if stored is None:
-            self._peak_demand_restore_unresolved = False
-            self._peak_demand_restore_error_logged = False
-            return
-        if not isinstance(stored, dict):
-            self._mark_peak_restore_unresolved("has invalid stored data")
-            return
-        current_cycle = self._billing_cycle_key(dt_util.now())
-        stored_cycle = stored.get("cycle")
-        if not isinstance(stored_cycle, str):
-            self._mark_peak_restore_unresolved("has an invalid stored billing cycle")
-            return
-        if stored_cycle != current_cycle:
-            # A different billing cycle or changed demand window intentionally
-            # starts a new, incomparable peak.
-            self._peak_demand_restore_unresolved = False
-            self._peak_demand_restore_error_logged = False
-            return
-        stored_identity = stored.get("identity")
-        if not isinstance(stored_identity, dict):
-            self._mark_peak_restore_unresolved("has an invalid stored identity")
-            return
-        if stored_identity != self._store_identity():
-            # The current billing cycle is not comparable after a demand-window
-            # configuration change.
-            self._peak_demand_restore_unresolved = False
-            self._peak_demand_restore_error_logged = False
-            return
-        try:
-            peak = float(stored["peak_demand_kw"])
-        except (KeyError, TypeError, ValueError):
-            self._mark_peak_restore_unresolved("has an invalid stored peak")
-            return
-        if not math.isfinite(peak) or peak < 0:
-            self._mark_peak_restore_unresolved("has a non-finite stored peak")
-            return
-        self._peak_demand_kw = max(self._peak_demand_kw, peak)
-        self._peak_demand_restore_unresolved = False
-        self._peak_demand_restore_error_logged = False
-
-    def _mark_peak_restore_unresolved(
-        self, reason: str, err: Exception | None = None
-    ) -> None:
-        """Keep a failed same-cycle restoration visible and non-destructive."""
-        self._peak_demand_restore_unresolved = True
-        detail = f": {err}" if err is not None else ""
-        if not self._peak_demand_restore_error_logged:
-            _LOGGER.warning(
-                "Demand Charge peak %s; keeping Peak Demand This Cycle unavailable "
-                "until the stored value can be read%s",
-                reason,
-                detail,
-            )
-            self._peak_demand_restore_error_logged = True
-        else:
-            _LOGGER.debug("Demand Charge peak restoration remains unresolved%s", detail)
-
-    async def async_save(self, now: datetime | None = None) -> None:
-        """Persist the current peak for the active configured billing cycle."""
-        if self._store is None:
-            return
-        if self._peak_demand_restore_unresolved:
-            _LOGGER.debug(
-                "Not saving Demand Charge peak while its prior same-cycle value "
-                "is unresolved"
-            )
-            return
-        now = now or dt_util.now()
-        try:
-            await self._store.async_save(
-                {
-                    "cycle": self._billing_cycle_key(now),
-                    "identity": self._store_identity(),
-                    "peak_demand_kw": self._peak_demand_kw,
-                }
-            )
-        except Exception as err:
-            self._peak_demand_persistence_unresolved = True
-            if not self._peak_demand_save_error_logged:
-                _LOGGER.warning(
-                    "Could not save Demand Charge peak; keeping Peak Demand "
-                    "This Cycle unavailable until persistence succeeds: %s",
-                    err,
-                )
-                self._peak_demand_save_error_logged = True
-            else:
-                _LOGGER.debug(
-                    "Demand Charge peak persistence remains unresolved: %s", err
-                )
-        else:
-            self._peak_demand_persistence_unresolved = False
-            self._peak_demand_save_error_logged = False
-
-    def _is_in_peak_period(self, now: datetime) -> bool:
-        """Check if current time is within peak period and correct day."""
-        try:
-            # Check if today matches the configured days filter
-            weekday = now.weekday()  # 0=Monday, 6=Sunday
-            if self.days == "Weekdays Only" and weekday >= 5:
-                return False  # Saturday or Sunday
-            elif self.days == "Weekends Only" and weekday < 5:
-                return False  # Monday through Friday
-
-            # Check if current time is within peak period
-            # Handle both "HH:MM" and "HH:MM:SS" formats
-            start_parts = self.start_time.split(":")
-            start_hour, start_minute = int(start_parts[0]), int(start_parts[1])
-            end_parts = self.end_time.split(":")
-            end_hour, end_minute = int(end_parts[0]), int(end_parts[1])
-
-            current_minutes = now.hour * 60 + now.minute
-            start_minutes = start_hour * 60 + start_minute
-            end_minutes = end_hour * 60 + end_minute
-
-            # Handle overnight periods (e.g., 22:00 to 06:00)
-            if end_minutes <= start_minutes:
-                # Peak period wraps around midnight
-                return current_minutes >= start_minutes or current_minutes < end_minutes
-            else:
-                # Normal daytime peak period
-                return start_minutes <= current_minutes < end_minutes
-
-        except (ValueError, AttributeError) as err:
-            _LOGGER.error("Invalid time format for demand charge period: %s", err)
-            return False
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Update demand charge tracking data."""
-        if not self.enabled:
-            return {
-                "in_peak_period": False,
-                "grid_import_power_kw": 0.0,
-                "peak_demand_kw": 0.0,
-                "estimated_cost": 0.0,
-            }
-
-        # Check for billing cycle reset
-        now = dt_util.now()
-        current_day = now.day
-
-        # A transient Store failure is retried on the next regular update. The
-        # session candidate is retained and merged with a recovered stored peak.
-        if self._peak_demand_restore_unresolved:
-            await self.async_load()
-
-        # A peak can fail to persist after it was observed, even without a
-        # higher sample on the next minute. Retry that exact retained peak so a
-        # transient Store failure cannot leave accounting state behind.
-        if self._peak_demand_persistence_unresolved:
-            await self.async_save(now)
-
-        # If we've crossed the billing day, reset peak demand
-        if self._last_billing_day_check is not None:
-            # Check if we've passed the billing day since last check
-            last_check_day = self._last_billing_day_check.day
-            if current_day == self.billing_day and last_check_day != self.billing_day:
-                _LOGGER.info(
-                    "Billing cycle reset triggered on day %d", self.billing_day
-                )
-                self.reset_peak_demand()
-                self._peak_demand_restore_unresolved = False
-                self._peak_demand_restore_error_logged = False
-                await self.async_save(now)
-
-        self._last_billing_day_check = now
-
-        # Get current grid power from energy coordinator (Tesla, FoxESS, Sigenergy, or Sungrow)
-        energy_data = self.tesla_coordinator.data or {}
-        grid_power_kw = energy_data.get("grid_power", 0.0)
-
-        # Grid import is positive, export is negative
-        # We only care about import for demand charges
-        grid_import_kw = max(0, grid_power_kw)
-
-        # Check if in peak period
-        in_peak_period = self._is_in_peak_period(now)
-
-        # Update peak demand only for samples inside the billable demand window.
-        if in_peak_period and grid_import_kw > self._peak_demand_kw:
-            self._peak_demand_kw = grid_import_kw
-            _LOGGER.info("New peak demand: %.2f kW", self._peak_demand_kw)
-            await self.async_save(now)
-
-        # Do not publish the constructor's zero as an accounting value when a
-        # same-cycle restore is unresolved.
-        peak_demand_kw = (
-            None
-            if (
-                self._peak_demand_restore_unresolved
-                or self._peak_demand_persistence_unresolved
-            )
-            else self._peak_demand_kw
-        )
-        estimated_demand_cost = (
-            None if peak_demand_kw is None else peak_demand_kw * self.rate
-        )
-
-        # Calculate days elapsed in current billing cycle
-        days_elapsed = self._calculate_days_elapsed(now)
-
-        # Calculate days until next billing cycle reset
-        days_until_reset = self._calculate_days_until_reset(now)
-
-        # Calculate daily supply charge cost (accumulates daily)
-        daily_supply_cost = self.daily_supply_charge * days_elapsed
-
-        # Calculate total monthly cost
-        total_monthly_cost = (
-            None
-            if estimated_demand_cost is None
-            else estimated_demand_cost + daily_supply_cost + self.monthly_supply_charge
-        )
-
-        return {
-            "in_peak_period": in_peak_period,
-            "grid_import_power_kw": grid_import_kw,
-            "peak_demand_kw": peak_demand_kw,
-            "estimated_cost": estimated_demand_cost,
-            "daily_supply_charge_cost": daily_supply_cost,
-            "monthly_supply_charge": self.monthly_supply_charge,
-            "total_monthly_cost": total_monthly_cost,
-            "days_until_reset": days_until_reset,
-            "last_update": dt_util.utcnow(),
-        }
-
-    def reset_peak_demand(self) -> None:
-        """Reset peak demand tracking (e.g., at start of new billing cycle)."""
-        _LOGGER.info("Resetting peak demand from %.2f kW to 0", self._peak_demand_kw)
-        self._peak_demand_kw = 0.0
-
-    def _calculate_days_elapsed(self, now: datetime) -> int:
-        """Calculate days elapsed since last billing day."""
-        current_day = now.day
-
-        if current_day >= self.billing_day:
-            # We're past the billing day this month
-            days_elapsed = current_day - self.billing_day + 1
-        else:
-            # We haven't reached the billing day this month yet
-            # Need to count from last month's billing day
-            # Get the last day of previous month
-            first_of_this_month = now.replace(day=1)
-            last_month = first_of_this_month - timedelta(days=1)
-            last_day_of_last_month = last_month.day
-
-            # Days from billing day last month to end of last month
-            if self.billing_day <= last_day_of_last_month:
-                days_in_last_month = last_day_of_last_month - self.billing_day + 1
-            else:
-                # Billing day doesn't exist in last month (e.g., Feb 30)
-                # Start from last day of last month
-                days_in_last_month = 1
-
-            # Plus days in current month
-            days_elapsed = days_in_last_month + current_day
-
-        return days_elapsed
-
-    def _calculate_days_until_reset(self, now: datetime) -> int:
-        """Calculate days until next billing cycle reset."""
-        current_day = now.day
-
-        if current_day < self.billing_day:
-            # Next reset is this month
-            return self.billing_day - current_day
-        else:
-            # Next reset is next month
-            # Get the last day of this month
-            if now.month == 12:
-                next_month = now.replace(year=now.year + 1, month=1, day=1)
-            else:
-                next_month = now.replace(month=now.month + 1, day=1)
-
-            last_day_this_month = (next_month - timedelta(days=1)).day
-
-            # Days remaining in this month plus billing day in next month
-            days_remaining_this_month = last_day_this_month - current_day
-            return days_remaining_this_month + self.billing_day
-
-
 class NativeBatteryIntegrationReadinessMixin:
     """Shared startup guard for battery paths owned by another HA integration."""
 
@@ -2438,7 +2003,6 @@ class NativeBatteryIntegrationReadinessMixin:
         if "grid_power_valid" in stale:
             stale["grid_power_valid"] = False
         return stale
-
 
 class DiscoveredEntityEnergyCoordinator(
     NativeBatteryIntegrationReadinessMixin,
