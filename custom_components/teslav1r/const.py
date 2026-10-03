@@ -1,4 +1,5 @@
 """Constants for the Teslav1r integration."""
+
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -89,6 +90,12 @@ CONF_CUSTOM_GRID_POWER_ENTITY = "custom_grid_power_entity"
 CONF_CUSTOM_SOLAR_POWER_ENTITY = "custom_solar_power_entity"
 CONF_CUSTOM_LOAD_POWER_ENTITY = "custom_load_power_entity"
 
+CONF_HARDWARE_BACKUP_RESERVE = "hardware_backup_reserve"
+CONF_OPTIMIZATION_BACKUP_RESERVE = "optimization_backup_reserve"
+CONF_OPTIMIZATION_MANUAL_RESERVE = "optimization_manual_reserve"
+CONF_OPTIMIZATION_MAX_CHARGE_W = "optimization_max_charge_w"
+CONF_OPTIMIZATION_MAX_DISCHARGE_W = "optimization_max_discharge_w"
+CONF_OPTIMIZATION_MAX_GRID_EXPORT_W = "optimization_max_grid_export_w"
 
 # Tesla API Provider selection
 CONF_TESLA_API_PROVIDER = "tesla_api_provider"
@@ -97,9 +104,9 @@ TESLA_PROVIDER_FLEET_API = "fleet_api"
 # All supported Tesla/EV integrations (for device/entity discovery)
 # These are the HA integration domain names used in device identifiers
 TESLA_INTEGRATIONS = [
-    "tesla_fleet",    # Official Tesla Fleet API integration
-    "tesla_custom",   # Tesla Custom Integration
-    "tesla",          # Older Tesla integration
+    "tesla_fleet",  # Official Tesla Fleet API integration
+    "tesla_custom",  # Tesla Custom Integration
+    "tesla",  # Older Tesla integration
 ]
 
 
@@ -162,6 +169,7 @@ TESLA_LOCAL_CONTROL_MAX_AGE_SECONDS = 30
 FLEET_API_BASE_URL = "https://fleet-api.prd.na.vn.cloud.tesla.com"
 FLEET_API_AUTH_URL = "https://auth.tesla.com/oauth2/v3"
 FLEET_API_TOKEN_URL = "https://auth.tesla.com/oauth2/v3/token"
+
 
 def get_tesla_api_base_url(
     provider: str | None, fleet_base_url: str | None = None
@@ -227,6 +235,8 @@ SERVICE_HOLD_BATTERY_SOC = "hold_battery_soc"
 SERVICE_RESTORE_NORMAL = "restore_normal"
 SERVICE_GET_CALENDAR_HISTORY = "get_calendar_history"
 SERVICE_SYNC_BATTERY_HEALTH = "sync_battery_health"
+SERVICE_SYNC_NOW = "sync_now"
+SERVICE_SYNC_TOU = "sync_tou"
 SERVICE_PREVIEW_HISTORY_RELINK = "preview_history_relink"
 SERVICE_APPLY_HISTORY_RELINK = "apply_history_relink"
 SERVICE_SET_BACKUP_RESERVE = "set_backup_reserve"
@@ -298,8 +308,6 @@ OPTIMIZATION_PROVIDER_NATIVE_NAMES = {
 }
 
 
-
-
 def normalize_grid_charge_blackout_windows(value) -> list[dict[str, str]]:
     """Return canonical local-time grid-charge blackout windows.
 
@@ -330,8 +338,10 @@ def normalize_grid_charge_blackout_windows(value) -> list[dict[str, str]]:
         if not isinstance(start, str) or not isinstance(end, str):
             raise TypeError("blackout times must be strings")
         for clock in (start, end):
-            if len(clock) != 5 or clock[2] != ":" or not (
-                clock[:2].isdigit() and clock[3:].isdigit()
+            if (
+                len(clock) != 5
+                or clock[2] != ":"
+                or not (clock[:2].isdigit() and clock[3:].isdigit())
             ):
                 raise ValueError("blackout times must use HH:MM")
             hour, minute = int(clock[:2]), int(clock[3:])
@@ -347,8 +357,8 @@ def normalize_grid_charge_blackout_windows(value) -> list[dict[str, str]]:
 COST_FUNCTION_COST = "cost"
 
 # Default optimization settings
-DEFAULT_OPTIMIZATION_INTERVAL = 5      # Re-optimize every 5 minutes
-DEFAULT_OPTIMIZATION_HORIZON = 48      # 48-hour forecast horizon
+DEFAULT_OPTIMIZATION_INTERVAL = 5  # Re-optimize every 5 minutes
+DEFAULT_OPTIMIZATION_HORIZON = 48  # 48-hour forecast horizon
 DEFAULT_OPTIMIZATION_BACKUP_RESERVE = 0.20  # 20% minimum SOC
 DEFAULT_OPTIMIZATION_MIN_EXPORT_PRICE = 0.0  # $/kWh; 0 preserves current behavior
 DEFAULT_OPTIMIZATION_BACKUP_ENERGY_WH = 0  # Disabled until explicitly configured
@@ -362,14 +372,14 @@ DEFAULT_PROFIT_MAX_TARGET_SOC = DEFAULT_CHARGE_BY_TIME_TARGET_SOC
 
 # Battery capacity defaults by system (Wh)
 BATTERY_CAPACITY_DEFAULTS = {
-    BATTERY_SYSTEM_TESLA: 13500,     # Powerwall 2: 13.5 kWh
-    BATTERY_SYSTEM_CUSTOM: 10000,     # User-provided external system
+    BATTERY_SYSTEM_TESLA: 13500,  # Powerwall 2: 13.5 kWh
+    BATTERY_SYSTEM_CUSTOM: 10000,  # User-provided external system
 }
 
 # Max charge/discharge power defaults by system (W)
 BATTERY_POWER_DEFAULTS = {
-    BATTERY_SYSTEM_TESLA: 5000,       # Powerwall 2: 5 kW continuous
-    BATTERY_SYSTEM_CUSTOM: 5000,       # User-provided external system
+    BATTERY_SYSTEM_TESLA: 5000,  # Powerwall 2: 5 kW continuous
+    BATTERY_SYSTEM_CUSTOM: 5000,  # User-provided external system
 }
 
 # Optimization sensor types
@@ -377,7 +387,9 @@ SENSOR_TYPE_OPTIMIZATION_STATUS = "optimization_status"
 SENSOR_TYPE_OPTIMIZATION_SAVINGS = "optimization_savings"
 SENSOR_TYPE_OPTIMIZATION_NEXT_ACTION = "optimization_next_action"
 SENSOR_TYPE_OPTIMIZATION_FORCE_CHARGE_WINDOWS = "optimization_force_charge_windows"
-SENSOR_TYPE_OPTIMIZATION_FORCE_DISCHARGE_WINDOWS = "optimization_force_discharge_windows"
+SENSOR_TYPE_OPTIMIZATION_FORCE_DISCHARGE_WINDOWS = (
+    "optimization_force_discharge_windows"
+)
 
 
 # ============================================================
