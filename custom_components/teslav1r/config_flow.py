@@ -66,19 +66,13 @@ from .const import (
     # Battery system selection
     CONF_BATTERY_SYSTEM,
     CONF_DISPLAY_CURRENCY,
-    CONF_FLEET_API_BASE_URL,
     CONF_POWERWALL_LOCAL_IP,
     CONF_TESLA_API_PROVIDER,
     CONF_TESLA_ENERGY_SITE_ID,
-    CONF_TESLA_EV_API_PROVIDER,
-    CONF_TESLA_EV_TELEMETRY_TOKEN,
-    CONF_TESLEMETRY_API_TOKEN,
     DISPLAY_CURRENCIES,
     DISPLAY_CURRENCY_AUTOMATIC,
     DOMAIN,
     FLEET_API_BASE_URL,
-    TESLA_EV_API_PROVIDER_FLEET_API,
-    TESLA_EV_API_PROVIDER_NONE,
     TESLA_PROVIDER_FLEET_API,
 )
 from .currency import (
@@ -524,20 +518,6 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             **getattr(self, "_battery_profile_data", {}),
         }
 
-        # Set battery system type
-        if self._selected_battery_system:
-            data[CONF_BATTERY_SYSTEM] = self._selected_battery_system
-
-        # Tesla EV API provider (chosen during async_step_tesla_provider).
-        # Defaults to "none" so non-Tesla setups stay clean.
-        ev_provider_choice = getattr(
-            self, "_tesla_ev_provider", TESLA_EV_API_PROVIDER_NONE
-        )
-        data[CONF_TESLA_EV_API_PROVIDER] = ev_provider_choice
-        ev_token = getattr(self, "_tesla_ev_teslemetry_token", None)
-        if ev_token:
-            data[CONF_TESLA_EV_TELEMETRY_TOKEN] = ev_token
-
         # Set appropriate title based on battery system and provider
         title = "Tesla v1r"
 
@@ -625,186 +605,6 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ),
                 }
             )
-
-        async def _handle_ev_provider_selection(
-            user_input_local: dict[str, Any],
-        ) -> FlowResult | None:
-            """Stash and validate the EV provider choice. Returns a follow-up
-            FlowResult when the user picked Teslemetry-without-detection (token
-            entry), or None to indicate the caller should continue normally."""
-            ev_choice = user_input_local.get(
-                CONF_TESLA_EV_API_PROVIDER, TESLA_EV_API_PROVIDER_NONE
-            )
-            self._tesla_ev_provider = ev_choice
-            detected = _detect_tesla_fleet_integration(self.hass)
-            if (
-                ev_choice == TESLA_EV_API_PROVIDER_FLEET_API
-                and not detected["tesla_fleet"]
-            ):
-                # Hard fail — Tesla Fleet OAuth can't be entered manually here
-                return self.async_show_form(
-                    step_id="tesla_provider",
-                    data_schema=_build_schema(self._tesla_fleet_available),
-                    errors={CONF_TESLA_EV_API_PROVIDER: "tesla_fleet_not_installed"},
-                )
-
-        # Tesla Fleet is available - let user choose
-        if user_input is not None:
-            ev_followup = await _handle_ev_provider_selection(user_input)
-            if ev_followup is not None:
-                return ev_followup
-
-            self._selected_provider = user_input[CONF_TESLA_API_PROVIDER]
-
-            if self._selected_provider == TESLA_PROVIDER_FLEET_API:
-                # User chose Fleet API - validate and get sites
-                _LOGGER.info("User selected Tesla Fleet API")
-                validation_result = await validate_fleet_api_token(
-                    self.hass, self._tesla_fleet_token
-                )
-
-                if validation_result["success"]:
-                    # Store empty Teslemetry token (we'll use Fleet API in __init__.py)
-                    # AND persist the provider choice so that on HA restart the
-                    # integration remembers we picked Fleet API instead of
-                    # defaulting back to Teslemetry (which would then 401 on
-                    # the empty token and break the Tesla coordinator).
-                    # Also persist the regional base URL so EU/AP users don't hit
-                    # the hardcoded NA endpoint on every subsequent API call.
-                    self._teslemetry_data = {
-                        CONF_TESLEMETRY_API_TOKEN: "",
-                        CONF_TESLA_API_PROVIDER: TESLA_PROVIDER_FLEET_API,
-                        CONF_FLEET_API_BASE_URL: validation_result.get("base_url", FLEET_API_BASE_URL),
-                    }
-                    self._tesla_sites = validation_result.get("sites", [])
-                    return await self.async_step_site_selection()
-                else:
-                    # Fleet API validation failed - show error
-                    errors = {"base": validation_result.get("error", "unknown")}
-                    return self.async_show_form(
-                        step_id="tesla_provider",
-                        data_schema=_build_schema(include_fleet=True),
-                        errors=errors,
-                    )
-
-        # Show provider selection form — default to Fleet (free, recommended)
-        return self.async_show_form(
-            step_id="tesla_provider",
-            data_schema=_build_schema(include_fleet=True),
-            description_placeholders={
-                "fleet_detected": "✓ Tesla Fleet integration detected!",
-            },
-        )
-
-    @staticmethod
-    def _months_in_tariff_season(from_month: int, to_month: int) -> list[int]:
-        """Expand an inclusive, possibly year-wrapping month range."""
-        if not 1 <= from_month <= 12 or not 1 <= to_month <= 12:
-            return []
-        if from_month <= to_month:
-            return list(range(from_month, to_month + 1))
-        return list(range(from_month, 13)) + list(range(1, to_month + 1))
-
-    @classmethod
-    def _tariff_seasons_error(cls, seasons: list[dict]) -> str | None:
-        """Validate unique names and exact, non-overlapping year coverage."""
-        if not seasons:
-            return "season_required"
-
-        names: set[str] = set()
-        coverage: dict[int, str] = {}
-        has_all_year_fallback = False
-        for season in seasons:
-            name = str(season.get("name", "")).strip()
-            if not name or name.casefold() in names:
-                return "season_name_invalid"
-            names.add(name.casefold())
-            try:
-                from_month = int(season.get("from_month"))
-                to_month = int(season.get("to_month"))
-            except (TypeError, ValueError):
-                return "season_month_invalid"
-            months = cls._months_in_tariff_season(from_month, to_month)
-            if not months:
-                return "season_month_invalid"
-            if name.casefold() == "all year":
-                if months != list(range(1, 13)):
-                    return "season_month_invalid"
-                has_all_year_fallback = True
-                continue
-            for month in months:
-                if month in coverage:
-                    return "season_month_overlap"
-                coverage[month] = name
-
-        if not has_all_year_fallback and set(coverage) != set(range(1, 13)):
-            return "season_month_gap"
-        return None
-
-    @staticmethod
-    def _tariff_season_options(seasons: list[dict]) -> list[SelectOptionDict]:
-        """Build selector options for existing tariff seasons."""
-        return [
-            SelectOptionDict(value=str(season["name"]), label=str(season["name"]))
-            for season in seasons
-        ]
-
-    @staticmethod
-    def _tariff_month_options() -> list[SelectOptionDict]:
-        """Build month selector options without relying on locale state."""
-        names = (
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December",
-        )
-        return [
-            SelectOptionDict(value=str(index), label=name)
-            for index, name in enumerate(names, 1)
-        ]
-    @staticmethod
-    def _pop_tariff_period(
-        periods: list[dict], selection: object
-    ) -> dict | None:
-        """Remove one explicitly selected tariff period, failing closed."""
-        try:
-            index = int(str(selection))
-        except (TypeError, ValueError):
-            return None
-        if index < 0 or index >= len(periods):
-            return None
-        return periods.pop(index)
-
-    @staticmethod
-    def _tariff_period_remove_options(
-        periods: list[dict],
-    ) -> list[SelectOptionDict]:
-        """Build unambiguous selector options for removing a tariff period."""
-        day_labels = {
-            "weekdays": "Mon-Fri",
-            "weekends": "Sat-Sun",
-            "all_days": "Mon-Sun",
-        }
-        options = [
-            SelectOptionDict(value="none", label="Keep all added periods")
-        ]
-        for index, period in enumerate(periods):
-            label = {
-                "PEAK": "Peak",
-                "SHOULDER": "Shoulder",
-                "OFF_PEAK": "Off-Peak",
-                "SUPER_OFF_PEAK": "Super Off-Peak",
-            }.get(period.get("name"), str(period.get("name", "Period")))
-            options.append(
-                SelectOptionDict(
-                    value=str(index),
-                    label=(
-                        f"Remove {index + 1}. {label} "
-                        f"{int(period.get('start', 0)):02d}:00-"
-                        f"{int(period.get('end', 24)):02d}:00 "
-                        f"{day_labels.get(period.get('days'), 'Mon-Sun')}"
-                    ),
-                )
-            )
-        return options
 
     async def async_step_site_selection(
         self, user_input: dict[str, Any] | None = None
