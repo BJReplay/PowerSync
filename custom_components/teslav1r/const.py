@@ -25,6 +25,7 @@ TESLA_CAPABILITY_WAIT_SECONDS = 30.0
 # Configuration keys
 CONF_TESLA_FORCE_DISCHARGE_BUY_PRICE = "tesla_force_discharge_buy_price"
 CONF_TESLA_FORCE_DISCHARGE_SELL_PRICE = "tesla_force_discharge_sell_price"
+CONF_DEMAND_ALLOW_GRID_CHARGING = "demand_allow_grid_charging"
 DEFAULT_TESLA_FORCE_DISCHARGE_BUY_PRICE = 0.55  # $/kWh
 DEFAULT_TESLA_FORCE_DISCHARGE_SELL_PRICE = 25.0  # $/kWh
 CONF_DISPLAY_CURRENCY = "display_currency"
