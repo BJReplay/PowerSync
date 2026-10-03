@@ -65,21 +65,13 @@ from .const import (
     CONF_BATTERY_SENSOR_DISPLAY_MODE,
     # Battery system selection
     CONF_BATTERY_SYSTEM,
-    CONF_DISPLAY_CURRENCY,
     CONF_POWERWALL_LOCAL_IP,
     CONF_TESLA_API_PROVIDER,
     CONF_TESLA_ENERGY_SITE_ID,
-    DISPLAY_CURRENCIES,
-    DISPLAY_CURRENCY_AUTOMATIC,
     DOMAIN,
     FLEET_API_BASE_URL,
     TESLA_PROVIDER_FLEET_API,
 )
-from .currency import (
-    currency_for_provider,
-    selector_unit_for_provider,
-)
-from .monitoring import async_prepare_monitoring_handoff, finish_monitoring_handoff
 from .powerwall_host import normalize_powerwall_gateway_host
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,6 +81,7 @@ BATTERY_SYSTEM_CONNECTION_KEYS: dict[str, tuple[str, ...]] = {
     BATTERY_SYSTEM_TESLA: (CONF_TESLA_ENERGY_SITE_ID,),
 }
 
+
 def _stored_wh_to_kwh(value: Any, default_wh: int) -> float:
     """Convert a stored Wh/kWh value to kWh for config flow display."""
     try:
@@ -97,6 +90,7 @@ def _stored_wh_to_kwh(value: Any, default_wh: int) -> float:
         amount = float(default_wh)
     return amount / 1000.0 if amount >= 1000 else amount
 
+
 def _stored_w_to_kw(value: Any, default_w: int) -> float:
     """Convert a stored W/kW value to kW for config flow display."""
     try:
@@ -104,6 +98,7 @@ def _stored_w_to_kw(value: Any, default_w: int) -> float:
     except (TypeError, ValueError):
         amount = float(default_w)
     return amount / 1000.0 if amount > 100 else amount
+
 
 def _stored_optional_w_to_kw(value: Any) -> float | None:
     """Convert an optional stored W/kW value to kW for config flow display."""
@@ -117,6 +112,7 @@ def _stored_optional_w_to_kw(value: Any) -> float | None:
         return None
     return amount / 1000.0 if amount > 100 else amount
 
+
 def _stored_ratio_to_percent(value: Any, default_ratio: float) -> int:
     """Convert a stored 0-1 ratio or 0-100 percent to a clamped whole percent."""
     try:
@@ -127,25 +123,6 @@ def _stored_ratio_to_percent(value: Any, default_ratio: float) -> int:
         amount *= 100
     return max(0, min(100, round(amount)))
 
-def _stored_optional_price_to_cents(value: Any) -> float:
-    """Convert optional stored $/kWh or c/kWh to c/kWh for form display."""
-    if value in (None, "", []):
-        return 0.0
-    try:
-        amount = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    if amount <= 0:
-        return 0.0
-    return amount * 100.0 if amount <= 1 else amount
-
-def _stored_normalized_price_to_cents(value: Any) -> float:
-    """Convert an unambiguously stored $/kWh value to c/kWh."""
-    try:
-        amount = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, amount) * 100.0
 
 def _normalize_optional_entity(value: Any) -> str | None:
     """Return a usable entity id, or None for unset optional entity fields."""
@@ -157,6 +134,7 @@ def _normalize_optional_entity(value: Any) -> str | None:
         return None
     return entity_id
 
+
 def _form_kwh_to_wh(value: Any, default_kwh: float) -> int:
     """Convert a config flow kWh field to Wh for persisted optimizer config."""
     try:
@@ -165,6 +143,7 @@ def _form_kwh_to_wh(value: Any, default_kwh: float) -> int:
         amount = default_kwh
     return round(amount * 1000)
 
+
 def _form_kw_to_w(value: Any, default_kw: float) -> int:
     """Convert a config flow kW field to W for persisted optimizer config."""
     try:
@@ -172,6 +151,7 @@ def _form_kw_to_w(value: Any, default_kw: float) -> int:
     except (TypeError, ValueError):
         amount = default_kw
     return round(amount * 1000)
+
 
 def _form_optional_kw_to_w(value: Any) -> int | None:
     """Convert an optional config flow kW field to W, preserving explicit zero."""
@@ -185,25 +165,6 @@ def _form_optional_kw_to_w(value: Any) -> int | None:
         return None
     return round(amount * 1000)
 
-def _form_optional_cents_to_price(value: Any) -> float | None:
-    """Convert optional c/kWh form input to stored $/kWh."""
-    if value in (None, "", []):
-        return None
-    try:
-        amount = float(value)
-    except (TypeError, ValueError):
-        return None
-    if amount <= 0:
-        return None
-    return amount / 100.0 if amount > 1 else amount
-
-def _form_nonnegative_cents_to_price(value: Any) -> float:
-    """Convert a required c/kWh field to normalized stored $/kWh."""
-    try:
-        amount = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, amount) / 100.0
 
 def _form_percent_to_ratio(value: Any, default_ratio: float) -> float:
     """Convert a config flow percent field to a stored 0-1 ratio."""
@@ -212,6 +173,7 @@ def _form_percent_to_ratio(value: Any, default_ratio: float) -> float:
     except (TypeError, ValueError):
         amount = default_ratio * 100
     return max(0.0, min(1.0, amount / 100.0))
+
 
 def _default_optimizer_specs_for(battery_system: str) -> tuple[int, int, int]:
     capacity_wh = BATTERY_CAPACITY_DEFAULTS.get(
@@ -223,6 +185,7 @@ def _default_optimizer_specs_for(battery_system: str) -> tuple[int, int, int]:
         BATTERY_POWER_DEFAULTS[BATTERY_SYSTEM_TESLA],
     )
     return capacity_wh, power_w, power_w
+
 
 async def _validate_fleet_api_token_at(
     hass: HomeAssistant, api_token: str, base_url: str
@@ -249,10 +212,15 @@ async def _validate_fleet_api_token_at(
             return {"success": False, "error": "invalid_auth"}
         if response.status == 421:
             error_text = await response.text()
-            return {"success": False, "error": "out_of_region", "error_text": error_text}
+            return {
+                "success": False,
+                "error": "out_of_region",
+                "error_text": error_text,
+            }
         error_text = await response.text()
         _LOGGER.error("Fleet API error %s: %s", response.status, error_text[:200])
         return {"success": False, "error": "cannot_connect"}
+
 
 async def validate_fleet_api_token(
     hass: HomeAssistant, api_token: str
@@ -267,6 +235,7 @@ async def validate_fleet_api_token(
         result = await _validate_fleet_api_token_at(hass, api_token, FLEET_API_BASE_URL)
         if result.get("error") == "out_of_region":
             import re
+
             error_text = result.get("error_text", "")
             match = re.search(r"use base URL:\s*(https://[^\s,]+)", error_text)
             if match:
@@ -275,7 +244,10 @@ async def validate_fleet_api_token(
                     "Fleet API 421 — retrying with regional endpoint: %s", regional_url
                 )
                 return await _validate_fleet_api_token_at(hass, api_token, regional_url)
-            _LOGGER.error("Fleet API 421 but could not parse regional URL from: %s", error_text[:300])
+            _LOGGER.error(
+                "Fleet API 421 but could not parse regional URL from: %s",
+                error_text[:300],
+            )
             return {"success": False, "error": "cannot_connect"}
         return result
     except aiohttp.ClientError:
@@ -293,7 +265,7 @@ def _detect_tesla_fleet_integration(hass: HomeAssistant) -> dict[str, bool]:
     config flow can label provider options with their detection status.
     """
     result = {"tesla_fleet": False}
-    for integration in ("tesla_fleet"):
+    for integration in "tesla_fleet":
         for entry in hass.config_entries.async_entries(integration):
             if entry.state == ConfigEntryState.LOADED:
                 result[integration] = True
@@ -304,7 +276,7 @@ def _detect_tesla_fleet_integration(hass: HomeAssistant) -> dict[str, bool]:
 class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Teslav1r."""
 
-    VERSION = 10
+    VERSION = 1
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -317,18 +289,6 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Battery system selection
         self._selected_battery_system: str = BATTERY_SYSTEM_TESLA
         self._battery_profile_data: dict[str, Any] = {}
-
-    def _currency(self) -> str:
-        """Return the currency for the currently selected provider."""
-        return currency_for_provider(self._selected_electricity_provider, self.hass)
-
-    def _selector_unit(self, unit_kind: str = "minor_rate") -> str:
-        """Return a provider-aware unit label for setup selectors."""
-        return selector_unit_for_provider(
-            self._selected_electricity_provider,
-            self.hass,
-            unit_kind,
-        )
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -360,7 +320,9 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._reauth_entry is None:
             return self.async_abort(reason="reauth_failed")
 
-        _provider = self._reauth_entry.data.get(CONF_TESLA_API_PROVIDER, TESLA_PROVIDER_FLEET_API)
+        _provider = self._reauth_entry.data.get(
+            CONF_TESLA_API_PROVIDER, TESLA_PROVIDER_FLEET_API
+        )
 
         # Fleet API uses the existing tesla_fleet integration's tokens — no
         # token entry needed; abort and let the user fix tesla_fleet directly
@@ -406,19 +368,21 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     else None
                 )
                 yaml_anchor_allowed = False
-                if selected_entry is None and not (yaml_anchor_allowed and anchor_entity):
+                if selected_entry is None and not (
+                    yaml_anchor_allowed and anchor_entity
+                ):
                     errors[CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID] = (
                         "battery_integration_source_required"
                     )
-                elif selected_entry is not None and selected_entry.domain not in profile.upstream_domains:
+                elif (
+                    selected_entry is not None
+                    and selected_entry.domain not in profile.upstream_domains
+                ):
                     errors[CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID] = (
                         "battery_integration_source_mismatch"
                     )
 
-                if not errors and (
-                    profile.route_kind == "ha_monitoring"
-                    or profile.profile_id in {"goodwe_ha", "solaredge_ha_only"}
-                ):
+                if not errors and profile.route_kind == "ha_monitoring":
                     catalog = discover_battery_sensor_catalog(
                         self.hass,
                         battery_system=battery_system,
@@ -434,7 +398,6 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                     if missing:
                         errors["base"] = "battery_integration_missing_telemetry"
-
 
             if not errors and profile is not None:
                 if not profile.requires_upstream:
@@ -485,18 +448,18 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         }
         if upstream_entries:
-            schema_fields[
-                Optional(CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID)
-            ] = SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(
-                            value=source.entry_id,
-                            label=f"{source.title or source.entry_id} ({source.domain})",
-                        )
-                        for source in upstream_entries
-                    ],
-                    mode=SelectSelectorMode.DROPDOWN,
+            schema_fields[Optional(CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID)] = (
+                SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(
+                                value=source.entry_id,
+                                label=f"{source.title or source.entry_id} ({source.domain})",
+                            )
+                            for source in upstream_entries
+                        ],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
                 )
             )
         return self.async_show_form(
@@ -553,8 +516,6 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         )
 
-    
-
     async def async_step_tesla_provider(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -583,7 +544,6 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             e,
                         )
 
-
         def _build_schema(include_fleet: bool) -> Schema:
             energy_options: list[SelectOptionDict] = [
                 SelectOptionDict(
@@ -591,7 +551,6 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     label="Tesla Fleet API (Free - uses existing Tesla Fleet integration)",
                 ),
             ]
-
 
             return Schema(
                 {
@@ -620,12 +579,9 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except ValueError:
                 errors[CONF_POWERWALL_LOCAL_IP] = "powerwall_gateway_invalid"
             else:
-
                 # Store site selection data
                 self._site_data = {
-                    CONF_TESLA_ENERGY_SITE_ID: user_input[
-                        CONF_TESLA_ENERGY_SITE_ID
-                    ],
+                    CONF_TESLA_ENERGY_SITE_ID: user_input[CONF_TESLA_ENERGY_SITE_ID],
                 }
 
                 if gateway_ip:
@@ -728,7 +684,9 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
         new_data = dict(self.config_entry.data)
         new_options = dict(self.config_entry.options)
         new_data.update(data_updates)
-        new_options.update(option_updates if option_updates is not None else data_updates)
+        new_options.update(
+            option_updates if option_updates is not None else data_updates
+        )
         self.hass.config_entries.async_update_entry(
             self.config_entry,
             data=new_data,
@@ -737,58 +695,6 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
         self._schedule_entry_reload()
         return self.async_create_entry(title="", data=new_options)
 
-    async def _save_connection_profile_and_reload(
-        self,
-        data_updates: dict[str, Any],
-    ) -> FlowResult:
-        """Restore the old route, then atomically persist a profile change."""
-        old_profile = resolve_connection_profile(
-            self.config_entry.data,
-            self.config_entry.options,
-            self._effective_battery_system(),
-        )
-        route_changed = any(
-            data_updates.get(key) != self._get_option(key)
-            for key in (
-                CONF_BATTERY_CONNECTION_PROFILE,
-                CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID,
-                CONF_BATTERY_INTEGRATION_ANCHOR_ENTITY,
-            )
-        )
-        handoff_started = False
-        if route_changed and not old_profile.monitoring_only:
-            try:
-                await async_prepare_monitoring_handoff(
-                    self.hass,
-                    self.config_entry,
-                )
-                handoff_started = True
-            except Exception as err:
-                finish_monitoring_handoff(self.hass, self.config_entry)
-                _LOGGER.warning(
-                    "Battery connection profile remained '%s' because control "
-                    "cleanup failed: %s",
-                    old_profile.profile_id,
-                    err,
-                )
-                return self.async_abort(reason="monitoring_cleanup_failed")
-        try:
-            return self._save_connection_and_reload(data_updates)
-        finally:
-            if handoff_started:
-                finish_monitoring_handoff(self.hass, self.config_entry)
-
-    def _selector_unit(self, unit_kind: str = "minor_rate") -> str:
-        """Return a provider-aware unit label for options selectors."""
-        return selector_unit_for_provider(
-            self._electricity_provider(),
-            self.hass,
-            unit_kind,
-        )
-
-    def _currency(self) -> str:
-        """Return the configured currency."""
-        return currency_for_provider(self._electricity_provider(), self.hass)
 
     def _save_and_finish(self, section_data: dict[str, Any]) -> FlowResult:
         """Save a single section's data merged with existing options and finish."""
@@ -825,8 +731,6 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
 
         # Build menu options based on current config
         menu_options = [
-            "display_currency",
-            "pricing",
             "battery_system",
             "battery_connection_profile",
         ]
@@ -839,9 +743,6 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
 
         menu_options.extend(
             [
-                "optimization",
-                "ev_charging",
-                "ev_load_management",
                 "advanced",
             ]
         )
@@ -851,63 +752,12 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
             menu_options=menu_options,
         )
 
-    async def async_step_display_currency(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Choose the non-converting display currency used by clients."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            selected = user_input.get(CONF_DISPLAY_CURRENCY)
-            if selected not in DISPLAY_CURRENCIES:
-                errors[CONF_DISPLAY_CURRENCY] = "invalid_display_currency"
-            else:
-                # Keep this preference in options only: it must not alter a
-                # provider's tariff input, stored prices, or optimizer units.
-                return self._save_connection_and_reload(
-                    {}, {CONF_DISPLAY_CURRENCY: selected}
-                )
-
-        current = self._get_option(
-            CONF_DISPLAY_CURRENCY, DISPLAY_CURRENCY_AUTOMATIC
-        )
-        if current not in DISPLAY_CURRENCIES:
-            current = DISPLAY_CURRENCY_AUTOMATIC
-        return self.async_show_form(
-            step_id="display_currency",
-            data_schema=Schema({
-                Required(CONF_DISPLAY_CURRENCY, default=current): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            SelectOptionDict(
-                                value=DISPLAY_CURRENCY_AUTOMATIC,
-                                label="Automatic (provider / Home Assistant)",
-                            ),
-                            *[
-                                SelectOptionDict(value=currency, label=currency)
-                                for currency in DISPLAY_CURRENCIES
-                                if currency != DISPLAY_CURRENCY_AUTOMATIC
-                            ],
-                        ],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                )
-            }),
-            errors=errors,
-        )
-
     async def async_step_advanced(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Show optional and specialist settings outside the main path."""
         menu_options = [
             "back",
-            "network_export",
-            "inverter",
-            "curtailment",
-            "demand_charges",
-            "weather",
-            "auto_update",
-            "cloud_flow",
         ]
 
         return self.async_show_menu(
@@ -936,7 +786,7 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
             value = float(state.state)
         except (TypeError, ValueError):
             return False
-        if value != value or value in (float("inf"), float("-inf")):
+        if not isinstance(value, (int, float)) or value in (float("inf"), float("-inf")):
             return False
         if value < 0 and not allow_negative:
             return False
@@ -960,10 +810,12 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
             or getattr(registry_entry, "config_entry_id", None)
         ):
             return "network_export_source_untrusted"
-        if getattr(registry_entry, "config_entry_id", None) == self.config_entry.entry_id:
+        if (
+            getattr(registry_entry, "config_entry_id", None)
+            == self.config_entry.entry_id
+        ):
             return "network_export_source_untrusted"
         return None
-
 
     async def _route_to_battery_options(self, battery_system: str) -> FlowResult:
         """Route to the selected battery/control method options page."""
@@ -978,9 +830,7 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Menu handler: choose or change battery/control method."""
         if user_input is not None:
-            battery_system = user_input.get(
-                CONF_BATTERY_SYSTEM, BATTERY_SYSTEM_TESLA
-            )
+            battery_system = user_input.get(CONF_BATTERY_SYSTEM, BATTERY_SYSTEM_TESLA)
             if battery_system == self._effective_battery_system():
                 return await self.async_step_init()
             self._save_battery_system_selection(battery_system)
@@ -1048,11 +898,16 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
                     else None
                 )
                 yaml_anchor_allowed = False
-                if selected_entry is None and not (yaml_anchor_allowed and anchor_entity):
+                if selected_entry is None and not (
+                    yaml_anchor_allowed and anchor_entity
+                ):
                     errors[CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID] = (
                         "battery_integration_source_required"
                     )
-                elif selected_entry is not None and selected_entry.domain not in profile.upstream_domains:
+                elif (
+                    selected_entry is not None
+                    and selected_entry.domain not in profile.upstream_domains
+                ):
                     errors[CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID] = (
                         "battery_integration_source_mismatch"
                     )
@@ -1089,7 +944,9 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
                     ),
                 }
                 if selected_entry_id:
-                    updates[CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID] = selected_entry_id
+                    updates[CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID] = (
+                        selected_entry_id
+                    )
                 else:
                     updates[CONF_BATTERY_INTEGRATION_CONFIG_ENTRY_ID] = None
                 if anchor_entity:
@@ -1159,8 +1016,6 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
             },
         )
 
-
-
     async def async_step_tesla_connection(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -1168,7 +1023,9 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            tesla_provider = user_input.get(CONF_TESLA_API_PROVIDER, TESLA_PROVIDER_FLEET_API)
+            tesla_provider = user_input.get(
+                CONF_TESLA_API_PROVIDER, TESLA_PROVIDER_FLEET_API
+            )
             # Optional Powerwall local LAN access. Empty gateway IP clears it
             # (back to cloud-only mode); a non-empty IP requires the gateway
             # customer password.
@@ -1205,9 +1062,7 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
         current_tesla_provider = self.config_entry.data.get(
             CONF_TESLA_API_PROVIDER, TESLA_PROVIDER_FLEET_API
         )
-        current_gateway_ip = self.config_entry.data.get(
-            CONF_POWERWALL_LOCAL_IP, ""
-        )
+        current_gateway_ip = self.config_entry.data.get(CONF_POWERWALL_LOCAL_IP, "")
 
         tesla_providers = {
             TESLA_PROVIDER_FLEET_API: "Tesla Fleet API (Free - requires Tesla Fleet integration)",
@@ -1220,13 +1075,15 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
                     Required(
                         CONF_TESLA_API_PROVIDER,
                         default=current_tesla_provider,
-                    ): SelectSelector(SelectSelectorConfig(
-                        options=[
-                            SelectOptionDict(value=k, label=v)
-                            for k, v in tesla_providers.items()
-                        ],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(value=k, label=v)
+                                for k, v in tesla_providers.items()
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                     # Optional gateway LAN IP for direct local features.
                     # Pairing is cloud-based; gateway control uses RSA
                     # signing — no password required.
@@ -1238,7 +1095,6 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
             ),
             errors=errors,
         )
-
 
     async def async_step_init_tesla(
         self, user_input: dict[str, Any] | None = None
@@ -1282,13 +1138,15 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
                     Required(
                         CONF_TESLA_API_PROVIDER,
                         default=current_tesla_provider,
-                    ): SelectSelector(SelectSelectorConfig(
-                        options=[
-                            SelectOptionDict(value=k, label=v)
-                            for k, v in tesla_providers.items()
-                        ],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(value=k, label=v)
+                                for k, v in tesla_providers.items()
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
             errors=errors,
