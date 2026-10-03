@@ -851,8 +851,6 @@ class TeslaEnergyCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Tesla API (TFleet API)."""
-        if not self._energy_acc._last_update:
-            await self._energy_acc.async_restore()
         if not self._lifetime_totals_restored:
             await self.async_restore_lifetime_totals()
 

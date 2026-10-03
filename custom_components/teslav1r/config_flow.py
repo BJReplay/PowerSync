@@ -1,17 +1,18 @@
 """Config flow for Teslav1r integration."""
 
-from __future__ import annotations
-
 import logging
+import re
 import sys
 from typing import Any
 
 import aiohttp
+
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_TOKEN
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     SelectOptionDict,
@@ -29,27 +30,6 @@ from .battery_backend.profiles import (
     profiles_for_system,
     resolve_connection_profile,
 )
-
-if "probatio" in sys.modules:
-    validator = sys.modules["probatio"]
-else:
-    try:
-        import probatio
-
-        validator = probatio
-    except ImportError:
-        import voluptuous
-
-        validator = voluptuous
-
-Schema = validator.Schema
-Required = validator.Required
-Optional = validator.Optional
-All = validator.All
-Coerce = validator.Coerce
-Range = validator.Range
-Marker = validator.Marker
-
 from .const import (
     BATTERY_CAPACITY_DEFAULTS,
     BATTERY_POWER_DEFAULTS,
@@ -74,6 +54,26 @@ from .const import (
 )
 from .powerwall_host import normalize_powerwall_gateway_host
 
+if "probatio" in sys.modules:
+    validator = sys.modules["probatio"]
+else:
+    try:
+        import probatio
+
+        validator = probatio
+    except ImportError:
+        import voluptuous
+
+        validator = voluptuous
+
+Schema = validator.Schema
+Required = validator.Required
+Optional = validator.Optional
+All = validator.All
+Coerce = validator.Coerce
+Range = validator.Range
+Marker = validator.Marker
+
 _LOGGER = logging.getLogger(__name__)
 
 # Per-brand connection/detection keys. Only Tesla Retained
@@ -86,7 +86,7 @@ def _stored_wh_to_kwh(value: Any, default_wh: int) -> float:
     """Convert a stored Wh/kWh value to kWh for config flow display."""
     try:
         amount = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         amount = float(default_wh)
     return amount / 1000.0 if amount >= 1000 else amount
 
@@ -95,7 +95,7 @@ def _stored_w_to_kw(value: Any, default_w: int) -> float:
     """Convert a stored W/kW value to kW for config flow display."""
     try:
         amount = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         amount = float(default_w)
     return amount / 1000.0 if amount > 100 else amount
 
@@ -106,7 +106,7 @@ def _stored_optional_w_to_kw(value: Any) -> float | None:
         return None
     try:
         amount = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if amount < 0:
         return None
@@ -117,7 +117,7 @@ def _stored_ratio_to_percent(value: Any, default_ratio: float) -> int:
     """Convert a stored 0-1 ratio or 0-100 percent to a clamped whole percent."""
     try:
         amount = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         amount = float(default_ratio)
     if amount <= 1:
         amount *= 100
@@ -139,7 +139,7 @@ def _form_kwh_to_wh(value: Any, default_kwh: float) -> int:
     """Convert a config flow kWh field to Wh for persisted optimizer config."""
     try:
         amount = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         amount = default_kwh
     return round(amount * 1000)
 
@@ -148,7 +148,7 @@ def _form_kw_to_w(value: Any, default_kw: float) -> int:
     """Convert a config flow kW field to W for persisted optimizer config."""
     try:
         amount = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         amount = default_kw
     return round(amount * 1000)
 
@@ -159,7 +159,7 @@ def _form_optional_kw_to_w(value: Any) -> int | None:
         return None
     try:
         amount = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if amount < 0:
         return None
@@ -170,7 +170,7 @@ def _form_percent_to_ratio(value: Any, default_ratio: float) -> float:
     """Convert a config flow percent field to a stored 0-1 ratio."""
     try:
         amount = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         amount = default_ratio * 100
     return max(0.0, min(1.0, amount / 100.0))
 
@@ -234,8 +234,6 @@ async def validate_fleet_api_token(
     try:
         result = await _validate_fleet_api_token_at(hass, api_token, FLEET_API_BASE_URL)
         if result.get("error") == "out_of_region":
-            import re
-
             error_text = result.get("error_text", "")
             match = re.search(r"use base URL:\s*(https://[^\s,]+)", error_text)
             if match:
@@ -495,6 +493,8 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_BATTERY_SYSTEM, BATTERY_SYSTEM_TESLA
             )
 
+            return await self._route_to_battery_setup()
+
         return self.async_show_form(
             step_id="battery_system",
             data_schema=Schema(
@@ -519,30 +519,10 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_tesla_provider(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Let user choose between Tesla Fleet and Teslemetry."""
+        """Let user choose between Tesla Fleet and Nothing."""
         # Check if Tesla Fleet integration is configured and loaded
         self._tesla_fleet_available = False
         self._tesla_fleet_token = None
-
-        tesla_fleet_entries = self.hass.config_entries.async_entries("tesla_fleet")
-        if tesla_fleet_entries:
-            for tesla_entry in tesla_fleet_entries:
-                if tesla_entry.state == ConfigEntryState.LOADED:
-                    try:
-                        if CONF_TOKEN in tesla_entry.data:
-                            token_data = tesla_entry.data[CONF_TOKEN]
-                            if CONF_ACCESS_TOKEN in token_data:
-                                self._tesla_fleet_token = token_data[CONF_ACCESS_TOKEN]
-                                self._tesla_fleet_available = True
-                                _LOGGER.info(
-                                    "Tesla Fleet integration detected and available"
-                                )
-                                break
-                    except Exception as e:
-                        _LOGGER.warning(
-                            "Failed to extract tokens from Tesla Fleet integration: %s",
-                            e,
-                        )
 
         def _build_schema(include_fleet: bool) -> Schema:
             energy_options: list[SelectOptionDict] = [
@@ -564,6 +544,68 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ),
                 }
             )
+
+        tesla_fleet_entries = self.hass.config_entries.async_entries("tesla_fleet")
+        if tesla_fleet_entries:
+            for tesla_entry in tesla_fleet_entries:
+                if tesla_entry.state == ConfigEntryState.LOADED:
+                    try:
+                        if CONF_TOKEN in tesla_entry.data:
+                            token_data = tesla_entry.data[CONF_TOKEN]
+                            if CONF_ACCESS_TOKEN in token_data:
+                                self._tesla_fleet_token = token_data[CONF_ACCESS_TOKEN]
+                                self._tesla_fleet_available = True
+                                _LOGGER.info(
+                                    "Tesla Fleet integration detected and available"
+                                )
+                            else:
+                                # Hard fail — Tesla Fleet OAuth can't be entered manually here
+                                return self.async_show_form(
+                                    step_id="tesla_provider",
+                                    data_schema=_build_schema(
+                                        self._tesla_fleet_available
+                                    ),
+                                    errors={
+                                        CONF_TESLA_API_PROVIDER: "tesla_fleet_not_installed"
+                                    },
+                                )
+                    except Exception as e:
+                        _LOGGER.warning(
+                            "Failed to extract tokens from Tesla Fleet integration: %s",
+                            e,
+                        )
+
+        # Tesla Fleet is available - let user choose
+        if user_input is not None:
+            self._selected_provider = user_input[CONF_TESLA_API_PROVIDER]
+
+            if self._selected_provider == TESLA_PROVIDER_FLEET_API:
+                # User chose Fleet API - validate and get sites
+                _LOGGER.info("User selected Tesla Fleet API")
+                validation_result = await validate_fleet_api_token(
+                    self.hass, self._tesla_fleet_token
+                )
+
+                if validation_result["success"]:
+                    self._tesla_sites = validation_result.get("sites", [])
+                    return await self.async_step_site_selection()
+                else:
+                    # Fleet API validation failed - show error
+                    errors = {"base": validation_result.get("error", "unknown")}
+                    return self.async_show_form(
+                        step_id="tesla_provider",
+                        data_schema=_build_schema(include_fleet=True),
+                        errors=errors,
+                    )
+
+        # Show provider selection form — default to Tesla Fleet (free, recommended)
+        return self.async_show_form(
+            step_id="tesla_provider",
+            data_schema=_build_schema(include_fleet=True),
+            description_placeholders={
+                "fleet_detected": "✓ Tesla Fleet integration detected!",
+            },
+        )
 
     async def async_step_site_selection(
         self, user_input: dict[str, Any] | None = None
@@ -695,7 +737,6 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
         self._schedule_entry_reload()
         return self.async_create_entry(title="", data=new_options)
 
-
     def _save_and_finish(self, section_data: dict[str, Any]) -> FlowResult:
         """Save a single section's data merged with existing options and finish."""
         final = dict(self.config_entry.options)
@@ -784,9 +825,12 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
             return False
         try:
             value = float(state.state)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
-        if not isinstance(value, (int, float)) or value in (float("inf"), float("-inf")):
+        if not isinstance(value, (int, float)) or value in (
+            float("inf"),
+            float("-inf"),
+        ):
             return False
         if value < 0 and not allow_negative:
             return False
@@ -795,8 +839,6 @@ class Teslav1rOptionsFlow(config_entries.OptionsFlow):
 
     def _network_export_active_source_error(self, entity_id: str) -> str | None:
         """Return an active-mode provenance error for a limit source."""
-        from homeassistant.helpers import entity_registry as er
-
         registry_entry = er.async_get(self.hass).async_get(entity_id)
         if registry_entry is None:
             return "network_export_source_unregistered"

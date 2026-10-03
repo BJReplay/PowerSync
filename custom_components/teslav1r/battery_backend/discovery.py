@@ -1,7 +1,5 @@
 """Bounded upstream Home Assistant battery-entity discovery."""
 
-from __future__ import annotations
-
 from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
