@@ -12,7 +12,6 @@ from homeassistant.helpers import entity_registry as er
 from ..const import (
     BATTERY_SENSOR_DISPLAY_ALL,
     BATTERY_SENSOR_DISPLAY_OFF,
-    BATTERY_SYSTEM_SUNGROW,
 )
 
 _UNAVAILABLE = {"", "unknown", "unavailable", "none"}
@@ -284,10 +283,7 @@ def discover_canonical_entities(
             resolved[role] = candidates[0][1]
 
     missing = [role for role in _CANONICAL_ALIASES if role not in resolved]
-    if "grid_power" in resolved and (
-        battery_system == BATTERY_SYSTEM_SUNGROW
-        or "export_power" in resolved["grid_power"]
-    ):
+    if "grid_power" in resolved and "export_power" in resolved["grid_power"]:
         # An export entity reads positive while exporting; PowerSync's grid
         # convention is positive on import, so it always needs inverting.
         catalog["grid_power_multiplier"] = (
