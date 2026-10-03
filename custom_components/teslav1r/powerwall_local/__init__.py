@@ -1,4 +1,4 @@
-"""Local Tesla Powerwall control for PowerSync.
+"""Local Tesla Powerwall control for Teslav1r.
 
 Provides direct LAN communication with the Powerwall Gateway, bypassing the
 Tesla cloud. Supports two gateway generations:

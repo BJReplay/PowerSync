@@ -8,22 +8,21 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    DOMAIN,
     CONF_BATTERY_CURTAILMENT_ENABLED,
     CONF_FORCE_CHARGE_DURATION,
     CONF_FORCE_DISCHARGE_DURATION,
     CONF_POWERWALL_LOCAL_PAIRED,
     DEFAULT_DISCHARGE_DURATION,
     DISCHARGE_DURATIONS,
-    family_device_info,
+    DOMAIN,
     SENSOR_FAMILY_BATTERY,
     SENSOR_FAMILY_GRID_HOME,
-    TESLA_SITE_INFO_CONTROL_MAX_AGE_SECONDS,
     TESLA_LOCAL_CONTROL_MAX_AGE_SECONDS,
+    TESLA_SITE_INFO_CONTROL_MAX_AGE_SECONDS,
+    family_device_info,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,7 +52,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up PowerSync select entities."""
+    """Set up Teslav1r select entities."""
     default_value = str(DEFAULT_DISCHARGE_DURATION)
 
     # Persist defaults immediately (so values survive restart even before user changes them)
@@ -72,8 +71,8 @@ async def async_setup_entry(
     # and we never overwrite an existing entity_id.
     ent_reg = er.async_get(hass)
     desired_object_ids = {
-        CONF_FORCE_CHARGE_DURATION: "power_sync_force_charge_duration",
-        CONF_FORCE_DISCHARGE_DURATION: "power_sync_force_discharge_duration",
+        CONF_FORCE_CHARGE_DURATION: "tesla_v1r_force_charge_duration",
+        CONF_FORCE_DISCHARGE_DURATION: "tesla_v1r_force_discharge_duration",
     }
     legacy_entity_ids = {
         CONF_FORCE_CHARGE_DURATION: "select.force_charge_duration",
@@ -90,18 +89,17 @@ async def async_setup_entry(
         legacy_entity_id = legacy_entity_ids[key]
 
         # Only migrate the specific legacy ids -> desired ids.
-        if current_entity_id == legacy_entity_id and current_entity_id != desired_entity_id:
-            if ent_reg.async_get(desired_entity_id) is None:
-                ent_reg.async_update_entity(current_entity_id, new_entity_id=desired_entity_id)
+        if current_entity_id == legacy_entity_id and current_entity_id != desired_entity_id and ent_reg.async_get(desired_entity_id) is None:
+            ent_reg.async_update_entity(current_entity_id, new_entity_id=desired_entity_id)
 
     select_entities = [
-        PowerSyncDurationSelect(
+        Teslav1rDurationSelect(
             entry=entry,
             key=CONF_FORCE_CHARGE_DURATION,
             name="Force Charge Duration",
             suggested_object_id=desired_object_ids[CONF_FORCE_CHARGE_DURATION],
         ),
-        PowerSyncDurationSelect(
+        Teslav1rDurationSelect(
             entry=entry,
             key=CONF_FORCE_DISCHARGE_DURATION,
             name="Force Discharge Duration",
@@ -124,7 +122,7 @@ async def async_setup_entry(
     async_add_entities(select_entities)
 
 
-class PowerSyncDurationSelect(SelectEntity):
+class Teslav1rDurationSelect(SelectEntity):
     """Select entity for choosing a duration in minutes."""
 
     # User-facing duration picker for force charge/discharge — Controls, not Configuration.
@@ -200,7 +198,7 @@ class _TeslaSiteSelectBase(SelectEntity):
         self.hass = hass
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_suggested_object_id = f"power_sync_{key}"
+        self._attr_suggested_object_id = f"tesla_v1r_{key}"
         self._attr_name = name
         self._attr_icon = icon
         self._attr_options = options
