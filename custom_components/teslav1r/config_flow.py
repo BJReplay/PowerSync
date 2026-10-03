@@ -298,8 +298,8 @@ class Teslav1rConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
 
-        # Electricity provider selection is the first step
-        return await self.async_step_provider_selection()
+        # Battery system selection is the first step
+        return await self.async_step_battery_system()
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
         """Handle reauthentication when the stored token is no longer valid.
